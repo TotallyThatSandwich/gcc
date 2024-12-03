@@ -39,7 +39,7 @@ def check_auth():
                 return jsonify({"error": "Invalid token"}), 401
         return jsonify({"token": user["token"]}), 200
 
-@app.route('/getauth', methods=['GET'])
+@app.route('/getauth', methods=['POST'])
 def post_auth():
         data = request.get_json()
         user = auth.find_one({ "username": data["username"], "passwordHash": data["passwordHash"] })
