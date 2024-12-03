@@ -1,14 +1,27 @@
 import pymongo as pm
 import settings
 from flask import Flask, jsonify, request
+import hashlib
 
 client = pm.MongoClient(settings.MONGO_ADDRESS, username=settings.MONGO_USER, password=settings.MONGO_PASS)
 db = client["db"]
+auth = db["auth"]
 users = db["users"]
 channels = db["channels"]
 
 app = Flask(__name__)
 
+#auth
+@app.route('/auth', methods=['POST'])
+def post_auth():
+        data = request.get_json()
+        user = auth.find_one({ "username": get_md5_of_string(data["username"]), "password": data["password"] })
+        if user is None:
+                return jsonify({"error": "Invalid credentials"}), 401
+        return jsonify({"token": user["token"]}), 200
+
+
+# user
 @app.route('/user/<userId>', methods=['GET'])
 def get_user(userId):
         user = users.find_one({ "userId": userId })
