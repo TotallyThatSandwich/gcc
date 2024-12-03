@@ -7,9 +7,6 @@ db = client["db"]
 users = db["users"]
 channels = db["channels"]
 
-user_example = { "user": {"id": "", "username": ""}}
-
-
 app = Flask(__name__)
 
 @app.route('/user/<userId>', methods=['GET'])
