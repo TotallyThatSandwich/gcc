@@ -1,8 +1,10 @@
 import pymongo as pm
 import settings
 from flask import Flask, jsonify, request
+from flask_cors import CORS, cross_origin
 import binascii
 import os
+import uuid
 
 client = pm.MongoClient(settings.MONGO_ADDRESS, username=settings.MONGO_USER, password=settings.MONGO_PASS)
 db = client["db"]
@@ -12,12 +14,19 @@ channels = db["channels"]
 messages = db["messages"]
 
 app = Flask(__name__)
+cors = CORS(app)
 
 def generate_token():
     generated_token = binascii.hexlify(os.urandom(10)).decode()
-    while auth.find_one({ "token": generate_token }) is not None:
+    while auth.find_one({ "token": generated_token }) is not None:
         generated_token = binascii.hexlify(os.urandom(10)).decode()
     return generated_token
+
+def generate_user_id():
+        generated_id = str(uuid.uuid4())
+        while users.find_one({ "userId": generated_id }) is not None:
+                generated_id = str(uuid.uuid4())
+        return generated_id
 
 #auth
 @app.route('/checkauth', methods=['GET'])
@@ -33,7 +42,7 @@ def check_auth():
 @app.route('/getauth', methods=['GET'])
 def post_auth():
         data = request.get_json()
-        user = auth.find_one({ "username": data["username"], "passwordHash": data["password"] })
+        user = auth.find_one({ "username": data["username"], "passwordHash": data["passwordHash"] })
         if user is None:
                 return jsonify({"error": "Invalid credentials"}), 401
         return jsonify({"token": user["token"]}), 200
@@ -46,16 +55,41 @@ def post_user():
         user = users.find_one({ "username": data["username"] })
         if user is not None:
                 return jsonify({"error": "User already exists"}), 400
-        users.insert_one({ "username": data["username"], "userId": data["userId"] })
-        auth.insert_one({ "username": data["username"], "passwordHash": data["password"], "token": generate_token() })
-        return jsonify({"username": data["username"], "userId": data["userId"]}), 201
+        userId = generate_user_id()
+        token = str(generate_token())
+        users.insert_one({ "username": data["username"], "email": data["email"], "userId": userId })
+        auth.insert_one({ "username": data["username"], "passwordHash": data["passwordHash"], "token": token })
+        return jsonify({"token": token}), 201
 
-@app.route('/user/<userId>', methods=['GET'])
-def get_user(userId):
+@app.route('/userfromid/<userId>', methods=['GET'])
+def get_user_from_id(userId):
         user = users.find_one({ "userId": userId })
         if user is None:
                 return jsonify({"error": "User not found"}), 404
         return jsonify({"username": user["username"], "userId": user["userId"]}), 200
+
+@app.route('/userfromname/<userName>', methods=['GET'])
+def get_user_from_name(userName):
+        user = users.find_one({ "username": userName })
+        if user is None:
+                return jsonify({"error": "User not found"}), 404
+        return jsonify({"username": user["username"], "userId": user["userId"]}), 200
+
+@app.route('/users', methods=['GET'])
+def get_users():
+        users_list = []
+        for user in users.find():
+                users_list.append({"username": user["username"], "userId": user["userId"]})
+        return jsonify({"users": users_list}), 200
+
+@app.route('/userfromid/<userId>', methods=['DELETE'])
+def delete_user(userId):
+        user = users.find_one({ "userId": userId })
+        if user is None:
+                return jsonify({"error": "User not found"}), 404
+        users.delete_one({ "userId": userId })
+        return jsonify({"message": "User deleted"}), 200
+
 
 # channels
 @app.route('/channels', methods=['POST'])
