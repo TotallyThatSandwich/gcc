@@ -31,11 +31,9 @@ def generate_user_id():
 #auth
 @app.route('/checkauth', methods=['GET'])
 def check_auth():
-        data = request.get_json()
-        user = auth.find_one({ "token": data["token"] })
+        headers = request.headers
+        user = auth.find_one({ "token": headers.get('Authorization') })
         if user is None:
-                return jsonify({"error": "Invalid token"}), 401
-        if user["username"] != data["username"]:
                 return jsonify({"error": "Invalid token"}), 401
         return jsonify({"token": user["token"]}), 200
 
@@ -64,6 +62,12 @@ def post_user():
 @app.route('/userfromid/<userId>', methods=['GET'])
 def get_user_from_id(userId):
         user = users.find_one({ "userId": userId })
+        headers = request.headers
+        if headers.get('Authorization') is not None:
+            token = headers.get('Authorization')
+            auth_user = auth.find_one({ "token": token })
+            if auth_user is None:
+                return jsonify({"error": "Invalid token"}), 401
         if user is None:
                 return jsonify({"error": "User not found"}), 404
         return jsonify({"username": user["username"], "userId": user["userId"]}), 200
@@ -71,6 +75,12 @@ def get_user_from_id(userId):
 @app.route('/userfromname/<userName>', methods=['GET'])
 def get_user_from_name(userName):
         user = users.find_one({ "username": userName })
+        headers = request.headers
+        if headers.get('Authorization') is not None:
+            token = headers.get('Authorization')
+            auth_user = auth.find_one({ "token": token })
+            if auth_user is None:
+                return jsonify({"error": "Invalid token"}), 401
         if user is None:
                 return jsonify({"error": "User not found"}), 404
         return jsonify({"username": user["username"], "userId": user["userId"]}), 200
@@ -78,17 +88,23 @@ def get_user_from_name(userName):
 @app.route('/users', methods=['GET'])
 def get_users():
         users_list = []
+        headers = request.headers
+        if headers.get('Authorization') is not None:
+            token = headers.get('Authorization')
+            auth_user = auth.find_one({ "token": token })
+            if auth_user is None:
+                return jsonify({"error": "Invalid token"}), 401
         for user in users.find():
                 users_list.append({"username": user["username"], "userId": user["userId"]})
         return jsonify({"users": users_list}), 200
 
-@app.route('/userfromid/<userId>', methods=['DELETE'])
-def delete_user(userId):
-        user = users.find_one({ "userId": userId })
-        if user is None:
-                return jsonify({"error": "User not found"}), 404
-        users.delete_one({ "userId": userId })
-        return jsonify({"message": "User deleted"}), 200
+#@app.route('/userfromid/<userId>', methods=['DELETE'])
+#def delete_user(userId):
+#        user = users.find_one({ "userId": userId })
+#        if user is None:
+#                return jsonify({"error": "User not found"}), 404
+#        users.delete_one({ "userId": userId })
+#        return jsonify({"message": "User deleted"}), 200
 
 
 # channels
@@ -96,6 +112,12 @@ def delete_user(userId):
 def post_channel():
         data = request.get_json()
         channel = channels.find_one({ "channelId": data["channelId"] })
+        headers = request.headers
+        if headers.get('Authorization') is not None:
+            token = headers.get('Authorization')
+            auth_user = auth.find_one({ "token": token })
+            if auth_user is None:
+                return jsonify({"error": "Invalid token"}), 401
         if channel is not None:
                 return jsonify({"error": "Channel already exists"}), 400
         channels.insert_one({"channelId": data["channelId"], "messages": []})
@@ -104,6 +126,12 @@ def post_channel():
 @app.route('/channels', methods=['GET'])
 def get_channels():
         channels_list = []
+        headers = request.headers
+        if headers.get('Authorization') is not None:
+            token = headers.get('Authorization')
+            auth_user = auth.find_one({ "token": token })
+            if auth_user is None:
+                return jsonify({"error": "Invalid token"}), 401
         for channel in channels.find():
                 channels_list.append({"channelId": channel["channelId"], "messages": channel["messages"]})
         return jsonify({"channels": channels_list}), 200
@@ -111,6 +139,12 @@ def get_channels():
 @app.route('/channels/<channelId>', methods=['GET'])
 def get_channel(channelId):
         channel = channels.find_one({ "channelId": channelId })
+        headers = request.headers
+        if headers.get('Authorization') is not None:
+            token = headers.get('Authorization')
+            auth_user = auth.find_one({ "token": token })
+            if auth_user is None:
+                return jsonify({"error": "Invalid token"}), 401
         if channel is None:
                 return jsonify({"error": "Channel not found"}), 404
         return jsonify({"channelId": channel["channelId"], "messages": channel["messages"]}), 200
@@ -120,6 +154,12 @@ def get_channel(channelId):
 def post_message(channelId):
         data = request.get_json()
         channel = channels.find_one({ "channelId": channelId })
+        headers = request.headers
+        if headers.get('Authorization') is not None:
+            token = headers.get('Authorization')
+            auth_user = auth.find_one({ "token": token })
+            if auth_user is None:
+                return jsonify({"error": "Invalid token"}), 401
         if channel is None:
                 return jsonify({"error": "Channel not found"}), 404
         messages.insert_one({ "channelId": channelId, "message": data["message"], "timestamp": data["timestamp"], "sentuser": users.find_one({ "userId": data["userId"] }) })
@@ -129,6 +169,12 @@ def post_message(channelId):
 def get_messages(channelId):
         channel = channels.find_one({ "channelId": channelId })
         messagelist = []
+        headers = request.headers
+        if headers.get('Authorization') is not None:
+            token = headers.get('Authorization')
+            auth_user = auth.find_one({ "token": token })
+            if auth_user is None:
+                return jsonify({"error": "Invalid token"}), 401
         if channel is None:
                 return jsonify({"error": "Channel not found"}), 404
         for message in messages.find({}):
