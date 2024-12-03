@@ -14,7 +14,7 @@ def get_user(userId):
         user = users.find_one({ "userId": userId })
         if user is None:
                 return jsonify({"error": "User not found"}), 404
-        return jsonify({"username": user["username"], "email": user["email"], "userId": user["userId"], "salt": user["salt"], "password": user["password"]}), 200
+        return jsonify({"username": user["username"], "userId": user["userId"]}), 200
 
 # channels
 @app.route('/channels', methods=['POST'])
