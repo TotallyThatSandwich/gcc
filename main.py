@@ -15,7 +15,7 @@ app = Flask(__name__)
 @app.route('/auth', methods=['POST'])
 def post_auth():
         data = request.get_json()
-        user = auth.find_one({ "username": get_md5_of_string(data["username"]), "password": data["password"] })
+        user = auth.find_one({ "username": data["username"], "password": data["password"] })
         if user is None:
                 return jsonify({"error": "Invalid credentials"}), 401
         return jsonify({"token": user["token"]}), 200
