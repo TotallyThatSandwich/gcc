@@ -1,7 +1,7 @@
 import pymongo as pm
-import settings
 from flask import Flask, jsonify, request
 from flask_cors import CORS, cross_origin
+import settings
 import binascii
 import os
 import uuid
