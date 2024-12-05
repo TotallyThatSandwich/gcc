@@ -56,6 +56,7 @@ class chat_room(Namespace):
         """
         def __init__(self, namespace = None, chat_name = None, permissions:dict = None):
                 super().__init__(namespace)
+                print(namespace)
                 self.channelId = namespace
                 self.chat_name = chat_name
                 self.permissions = permissions
@@ -80,7 +81,7 @@ class chat_room(Namespace):
         
         def send_message(self, data):
                 room = data['room']
-                emit("receive_message", data, namespace=self, broadcast=True, to=room)
+                self.emit("receive_message", data, namespace=self, broadcast=True, to=room)
         
         # Connection
         def join_room(self, data):
@@ -94,7 +95,7 @@ class chat_room(Namespace):
                        return emit("error", {"error": "Invalid credentials"}, namespace=self)
 
                 join_room(room=room, sid=data['token'], namespace=self)
-                emit("connection", f"connecting {data['username']} to room", to=room)
+                self.emit("connection", f"connecting {data['username']} to room", to=room)
                 return {"status": 200, "message": "Connected to room"}
 
         def on_leave_room(self, data):
@@ -296,15 +297,20 @@ def delete_channels():
         for channel in channels.find():
                 channels.delete_one({ "channelId": channel["channelId"] })
         return jsonify({"message": "Channel deleted"}), 200
+
+@app.route("/namespaces", methods=['POST'])
+def fetch_namespaces():
+       return socket._nsps.keys()
 #rooms  
 @app.route("/channels/create", methods=['POST'])
 def create_channel():
         data = request.get_json()
-        chat = chat_room(data['channelId'], data['channelName'], data['channelPerms'])
+        chat = chat_room(f"/{data['channelId']}", data['channelName'], data['channelPerms'])
+        print(chat.namespace)
         channelDict = {"channelId": data['channelId'], "channelName": data['channelName'], "channelPerms": data['channelPerms']}
         channels.insert_one({"channelId": data['channelId'], "channelName": data['channelName'], "channelPerms": data['channelPerms']})
 
-        SocketIO.on_namespace(socket, chat)
+        socket.on_namespace(chat)
         return jsonify(channelDict), 201
 
 
@@ -327,8 +333,9 @@ def create_chat_rooms():
         channels = channels.find()
         print(channels)
         for channel in channels:
-                chat = chat_room(channel["channelId"], channel["channelName"], channel["channelPerms"])
+                chat = chat_room(f"/{channel['channelId']}", channel["channelName"], channel["channelPerms"])
                 rooms.update({channel["channelId"] : chat})
+                socket.on_namespace(chat)
         return rooms
 
 
