@@ -1,4 +1,5 @@
 import pymongo as pm
+import json
 from flask import Flask, jsonify, request
 from flask_socketio import SocketIO, send, emit, Namespace, join_room, leave_room
 from flask_cors import CORS, cross_origin
@@ -20,33 +21,44 @@ socket = SocketIO(app)
 
 rooms = {}
 
+
+
 # Websockets
 class chat_room(Namespace):
-        
         def __init__(self, namespace = None, chat_name = None, permissions:dict = None):
                 super().__init__(namespace)
                 self.channelId = namespace
                 self.chat_name = chat_name
                 self.permissions = permissions
         
-        def send_message(data):
-               emit("receive_message", data, broadcast=True)
+        def on_send_message(self, data):
+               emit("receive_message", data, namespace=self.channelId, broadcast=True)
 
-        def on_receive_message(data:dict):
+        def on_receive_message(self, data:dict):
                 """Updates client with message.
                 Args:
                     data (dict): dictionary containing author's  ``userId`` and ``content`` of the message.
+                    ``{"userId": uuid, "content": str, "target": str}``
                 """
-                pass # WIP: update client with new message!!!
-
+                
+                # Checks if message's target is the current channel, or if it is a private message. For now, just leave it empty.
+                if data["target"] == None: target = self.channelId
+                else: target = data["target"]
+                
+                send(data, to=target)
 
         # Connection
         def on_join(self, data):
+                
                 """A function to join the user to a room.
 
                 Args:
                     data (dict): A dictionary containing user information.
                 """
+
+                if data['token'] is None:
+                        return send(jsonify({"error": "Invalid credentials"}, 401), broadcast=False)
+
                 join_room(self.channelId, data['token'], self)
                 send(f"connecting {data['username']} to room", to=self.channelId)
 
@@ -57,6 +69,8 @@ class chat_room(Namespace):
                 Args:
                     data (dict): A dictionary containing user information.
                 """
+                if data['token'] is None:
+                        return send(jsonify({"error": "Invalid credentials"}, 401), broadcast=False)
 
                 leave_room(self.channelId, data['token'], self)
                 send(f"disconnecting {data['username']} from room", to=self.channelId)
@@ -64,6 +78,17 @@ class chat_room(Namespace):
         # Messages
         def handle_message(self, data):
                 print("receiving message: " + data)
+
+
+class user:
+        def __init__(self, username:str, email:str, userId:str, channel:chat_room):
+                self.username = username
+                self.email = email
+                self.userId = userId
+                self.channel:chat_room = None
+
+        def join_channel(self, channel):
+                pass
 
 
 def generate_token():
@@ -170,8 +195,8 @@ def post_channel():
                 return jsonify({"error": "Invalid token"}), 401
         if channel is not None:
                 return jsonify({"error": "Channel already exists"}), 400
-        channels.insert_one({"channelId": data["channelId"], "messages": []})
-        return jsonify({"channelId": data["channelId"], "messages": []}), 201
+        channels.insert_one({"channelId": data["channelId"], "channelName": data["channelName"]})
+        return jsonify({"channelId": data["channelId"], "channelName": data["channelName"]}), 201
 
 @app.route('/channels', methods=['GET'])
 def get_channels():
@@ -197,7 +222,7 @@ def get_channel(channelId):
                 return jsonify({"error": "Invalid token"}), 401
         if channel is None:
                 return jsonify({"error": "Channel not found"}), 404
-        return jsonify({"channelId": channel["channelId"], "messages": channel["messages"]}), 200
+        return jsonify({"channelId": channel["channelId"], "channelName": channel["channelName"]}), 200
 
 #messages
 @app.route('/channels/<channelId>/messages', methods=['POST'])
@@ -234,9 +259,24 @@ def get_messages(channelId):
 #rooms  
 @app.route("/channels/create", methods=['POST'])
 def create_channel(data):
-       chat = chat_room(data['channelId'], data['chatName'], data['permissions'])
-       channelDict = {"channelId": data['channelId'], "channelName": data['channelName'], "channelPerms": data['channelPerms']}
-       channels.insert_one(channelDict)
+        data = request.get_json()
+        chat = chat_room(data['channelId'], data['channelName'], data['channelPerms'])
+        channelDict = {"channelId": data['channelId'], "channelName": data['channelName'], "channelPerms": data['channelPerms']}
+        # channels.insert_one(channelDict)
+
+        SocketIO.on_namespace(chat)
+        return jsonify(channelDict), 201
+
+
+@socket.on("hello_world", namespace="/test")
+def on_test(data):
+        print(data)
+
+@socket.on("greetings", namespace="/test")
+def on_greetings(data):
+        print(data)
+        emit("greetings", "Herro world!")
+
 
 def create_chat_rooms():
         """Generates chat room classes of database information.
@@ -245,10 +285,11 @@ def create_chat_rooms():
             channels (collection): A raw collection of chat elements found in the database.
         """
         channels = channels.find()
-
+        print(channels)
         for channel in channels:
                 chat = chat_room(channel["channelId"], channel["channelName"], channel["channelPerms"])
                 rooms.update({channel["channelId"] : chat})
+        return rooms
 
 
 if __name__ == "__main__":

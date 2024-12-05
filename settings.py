@@ -7,3 +7,6 @@ MONGO_USER = os.getenv("MONGO-USER")
 MONGO_PASS = os.getenv("MONGO-PASS")
 MONGO_ADDRESS = os.getenv("MONGO-ADDRESS")
 
+USERNAME = os.getenv("USERNAME")
+PASSWORD = os.getenv("PASSWORD")
+
