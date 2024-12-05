@@ -78,12 +78,12 @@ class chat_room(Namespace):
                         return True
                 return False
         
-        def on_send_message(self, data):
+        def send_message(self, data):
                 room = data['room']
                 emit("receive_message", data, namespace=self, broadcast=True, to=room)
         
         # Connection
-        def on_join_room(self, data):
+        def join_room(self, data):
                 """A function to join the user to a room.
 
                 Args:
@@ -95,6 +95,7 @@ class chat_room(Namespace):
 
                 join_room(room=room, sid=data['token'], namespace=self)
                 emit("connection", f"connecting {data['username']} to room", to=room)
+                return {"status": 200, "message": "Connected to room"}
 
         def on_leave_room(self, data):
                 """A function to disconnect the user from a room.
@@ -242,12 +243,12 @@ def get_channels():
             if auth_user is None:
                 return jsonify({"error": "Invalid token"}), 401
         for channel in channels.find():
-                channels_list.append({"channelId": channel["channelId"], "messages": channel["messages"]})
+                channels_list.append({"channelId": channel["channelId"]})
         return jsonify({"channels": channels_list}), 200
 
 @app.route('/channels/<channelId>', methods=['GET'])
 def get_channel(channelId):
-        channel = channels.find_one({ "channelId": channelId })
+        channel = channels.find_one({"channelId": channelId})
         headers = request.headers
         if headers.get('Authorization') is not None:
             token = headers.get('Authorization')
@@ -290,15 +291,20 @@ def get_messages(channelId):
                 messagelist.append({"channelId" : message["channelId"], "message": message["message"]})
         return jsonify({"messages": channel["messages"]}), 200
 
+@app.route('/channels', methods=['DELETE'])
+def delete_channels():
+        for channel in channels.find():
+                channels.delete_one({ "channelId": channel["channelId"] })
+        return jsonify({"message": "Channel deleted"}), 200
 #rooms  
 @app.route("/channels/create", methods=['POST'])
-def create_channel(data):
+def create_channel():
         data = request.get_json()
         chat = chat_room(data['channelId'], data['channelName'], data['channelPerms'])
         channelDict = {"channelId": data['channelId'], "channelName": data['channelName'], "channelPerms": data['channelPerms']}
-        # channels.insert_one(channelDict)
+        channels.insert_one({"channelId": data['channelId'], "channelName": data['channelName'], "channelPerms": data['channelPerms']})
 
-        SocketIO.on_namespace(chat)
+        SocketIO.on_namespace(socket, chat)
         return jsonify(channelDict), 201
 
 
