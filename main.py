@@ -94,7 +94,7 @@ class chat_room(Namespace):
                        return emit("error", {"error": "Invalid credentials"}, namespace=self)
 
                 join_room(room=room, sid=data['token'], namespace=self)
-                emit(f"connecting {data['username']} to room", to=room)
+                emit("connection", f"connecting {data['username']} to room", to=room)
 
         def on_leave_room(self, data):
                 """A function to disconnect the user from a room.
@@ -104,10 +104,10 @@ class chat_room(Namespace):
                 """
                 room = data['room']
                 if not check_auth(data['token']):
-                       return emit("error", {"error": "Invalid credentials"}, namespace=self)
+                       return emit("error", jsonify({"error": "Invalid credentials"}, 401), namespace=self)
 
                 leave_room(room= room, sid=data['token'], namespace=self)
-                send(f"disconnecting {data['username']} from room", to=room)
+                emit("connection", f"disconnecting {data['username']} from room", to=room)
                 
         # Messages
         def on_messages(self, data):
