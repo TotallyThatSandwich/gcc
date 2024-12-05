@@ -28,13 +28,10 @@ class Client:
     
     def joinRoom(self, room):
         websockets.connect(f"ws://localhost:5000/connect", extra_headers=self.headers)
-        
-        
 
     async def sendMessage(self, message):
-        headers = self.headers.update({"content": message})
-        async with websockets.connect(f"ws://localhost:5000/{self.channel}", extra_headers=headers) as server:
-            await server.send(headers)
+        async with websockets.connect(f"ws://localhost:5000/{self.channel}", extra_headers=self.headers) as server:
+            await server.send(message=message)
 
     def getChannelFromId(self, channel):
         response = request("GET", f"http://localhost:5000/channel/{channel}", headers=self.headers)

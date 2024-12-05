@@ -25,59 +25,93 @@ rooms = {}
 
 # Websockets
 class chat_room(Namespace):
+        """A class to represent a namespace of the websocket. After creating a channel(``chat_room``), methods below are automatically handled as events.\n
+        When a user joins a channel, they should be connected to the websocket with the namespace ``/chat_room.channelId`` where the following events are handled.
+
+        Methods: 
+                ``check_auth``: Checks if ``auth`` exists in the database.
+                        args:
+                                auth (str): The token of the user.
+
+                ``create_room``: Creates a room in the channel.
+                        args:
+                                room (str): The room name for the room to be created.
+                
+                ``room_exists``: Checks if a room exists in the channel.
+                        args:
+                                room (str): The room name to check.
+        
+        Events:
+                ``on_send_message``: Sends a message to all users in the channel.
+
+                ``on_receive_message``: Receives a message from a user and sends it to all users in the channel.
+
+                ``on_join_room``: Connects the user to a channel.
+                        args:
+
+                ``on_leave_room``: Disconnects the user from a channel.
+
+        Args:
+            Namespace (_type_): _description_
+        """
         def __init__(self, namespace = None, chat_name = None, permissions:dict = None):
                 super().__init__(namespace)
                 self.channelId = namespace
                 self.chat_name = chat_name
                 self.permissions = permissions
+                self.rooms = []
+
+        # Basic methods
+        def check_auth(self, auth) -> bool:
+                try:
+                        if not auth.exists({"token": auth}):
+                                raise KeyError
+                        return True
+                except:
+                        return False
+                
+        def create_room(self, room):
+                self.rooms.append(room)
+
+        def room_exists(self, room):
+                if room in self.rooms:
+                        return True
+                return False
         
         def on_send_message(self, data):
-               emit("receive_message", data, namespace=self.channelId, broadcast=True)
-
-        def on_receive_message(self, data:dict):
-                """Updates client with message.
-                Args:
-                    data (dict): dictionary containing author's  ``userId`` and ``content`` of the message.
-                    ``{"userId": uuid, "content": str, "target": str}``
-                """
-                
-                # Checks if message's target is the current channel, or if it is a private message. For now, just leave it empty.
-                if data["target"] == None: target = self.channelId
-                else: target = data["target"]
-                
-                send(data, to=target)
-
+                room = data['room']
+                emit("receive_message", data, namespace=self, broadcast=True, to=room)
+        
         # Connection
-        def on_join(self, data):
-                
+        def on_join_room(self, data):
                 """A function to join the user to a room.
 
                 Args:
                     data (dict): A dictionary containing user information.
                 """
+                room = data['room']
+                if not check_auth(data['token']):
+                       return emit("error", {"error": "Invalid credentials"}, namespace=self)
 
-                if data['token'] is None:
-                        return send(jsonify({"error": "Invalid credentials"}, 401), broadcast=False)
+                join_room(room=room, sid=data['token'], namespace=self)
+                emit(f"connecting {data['username']} to room", to=room)
 
-                join_room(self.channelId, data['token'], self)
-                send(f"connecting {data['username']} to room", to=self.channelId)
-
-        def on_leave(self, data):
-
+        def on_leave_room(self, data):
                 """A function to disconnect the user from a room.
 
                 Args:
                     data (dict): A dictionary containing user information.
                 """
-                if data['token'] is None:
-                        return send(jsonify({"error": "Invalid credentials"}, 401), broadcast=False)
+                room = data['room']
+                if not check_auth(data['token']):
+                       return emit("error", {"error": "Invalid credentials"}, namespace=self)
 
-                leave_room(self.channelId, data['token'], self)
-                send(f"disconnecting {data['username']} from room", to=self.channelId)
+                leave_room(room= room, sid=data['token'], namespace=self)
+                send(f"disconnecting {data['username']} from room", to=room)
                 
         # Messages
-        def handle_message(self, data):
-                print("receiving message: " + data)
+        def on_messages(self, data):
+               print(data["content"])
 
 
 class user:
