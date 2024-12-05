@@ -37,7 +37,8 @@ class chat_room(Namespace):
                 Args:
                     data (dict): dictionary containing author's  ``userId`` and ``content`` of the message.
                 """
-                pass
+                pass # WIP: update client with new message!!!
+
 
         # Connection
         def on_join(self, data):
@@ -47,7 +48,7 @@ class chat_room(Namespace):
                     data (dict): A dictionary containing user information.
                 """
                 join_room(self.channelId, data['token'], self)
-                send(f"connecting {data['username']} to room", to=self)
+                send(f"connecting {data['username']} to room", to=self.channelId)
 
         def on_leave(self, data):
 
@@ -58,23 +59,12 @@ class chat_room(Namespace):
                 """
 
                 leave_room(self.channelId, data['token'], self)
-                send(f"disconnecting {data['username']} from room", to=self)
+                send(f"disconnecting {data['username']} from room", to=self.channelId)
                 
         # Messages
         def handle_message(self, data):
                 print("receiving message: " + data)
 
-def create_chat_rooms():
-        """Generates chat room classes of database information.
-
-        Args:
-            channels (collection): A raw collection of chat elements found in the database.
-        """
-        channels = channels.find()
-
-        for channel in channels:
-                chat = chat_room(channel["channelId"], channel["channelName"], channel["channelPerms"])
-                rooms.update({channel["channelId"] : chat})
 
 def generate_token():
     generated_token = binascii.hexlify(os.urandom(10)).decode()
@@ -245,8 +235,21 @@ def get_messages(channelId):
 @app.route("/channels/create", methods=['POST'])
 def create_channel(data):
        chat = chat_room(data['channelId'], data['chatName'], data['permissions'])
-       channelDict = {"channelId": data['channelId'], "chatroom": chat}
-       channels.insert_one({"channelId": data['channelId']})
+       channelDict = {"channelId": data['channelId'], "channelName": data['channelName'], "channelPerms": data['channelPerms']}
+       channels.insert_one(channelDict)
+
+def create_chat_rooms():
+        """Generates chat room classes of database information.
+
+        Args:
+            channels (collection): A raw collection of chat elements found in the database.
+        """
+        channels = channels.find()
+
+        for channel in channels:
+                chat = chat_room(channel["channelId"], channel["channelName"], channel["channelPerms"])
+                rooms.update({channel["channelId"] : chat})
+
 
 if __name__ == "__main__":
         app.run(debug=True)
