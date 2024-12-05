@@ -1,5 +1,6 @@
 import pymongo as pm
 from flask import Flask, jsonify, request
+from flask_socketio import SocketIO, send, emit, Namespace, join_room, leave_room
 from flask_cors import CORS, cross_origin
 import settings
 import binascii
@@ -15,6 +16,65 @@ messages = db["messages"]
 
 app = Flask(__name__)
 cors = CORS(app)
+socket = SocketIO(app)
+
+rooms = {}
+
+# Websockets
+class chat_room(Namespace):
+        
+        def __init__(self, namespace = None, chat_name = None, permissions:dict = None):
+                super().__init__(namespace)
+                self.channelId = namespace
+                self.chat_name = chat_name
+                self.permissions = permissions
+        
+        def send_message(data):
+               emit("receive_message", data, broadcast=True)
+
+        def on_receive_message(data:dict):
+                """Updates client with message.
+                Args:
+                    data (dict): dictionary containing author's  ``userId`` and ``content`` of the message.
+                """
+                pass
+
+        # Connection
+        def on_join(self, data):
+                """A function to join the user to a room.
+
+                Args:
+                    data (dict): A dictionary containing user information.
+                """
+                join_room(self.channelId, data['token'], self)
+                send(f"connecting {data['username']} to room", to=self)
+
+        def on_leave(self, data):
+
+                """A function to disconnect the user from a room.
+
+                Args:
+                    data (dict): A dictionary containing user information.
+                """
+
+                leave_room(self.channelId, data['token'], self)
+                send(f"disconnecting {data['username']} from room", to=self)
+                
+        # Messages
+        def handle_message(self, data):
+                print("receiving message: " + data)
+
+def create_chat_rooms():
+        """Generates chat room classes of database information.
+
+        Args:
+            channels (collection): A raw collection of chat elements found in the database.
+        """
+        channels = channels.find()
+
+        for channel in channels:
+                chat = chat_room(channel["channelId"], channel["channelName"], channel["channelPerms"])
+                rooms.update({channel["channelId"] : chat})
 
 def generate_token():
     generated_token = binascii.hexlify(os.urandom(10)).decode()
@@ -53,9 +113,9 @@ def post_user():
         user = users.find_one({ "username": data["username"] })
         if user is not None:
                 return jsonify({"error": "User already exists"}), 400
-        userId = generate_user_id()
+        user_id = generate_user_id()
         token = str(generate_token())
-        users.insert_one({ "username": data["username"], "email": data["email"], "userId": userId })
+        users.insert_one({ "username": data["username"], "email": data["email"], "userId": user_id })
         auth.insert_one({ "username": data["username"], "passwordHash": data["passwordHash"], "token": token })
         return jsonify({"token": token}), 201
 
@@ -181,6 +241,12 @@ def get_messages(channelId):
                 messagelist.append({"channelId" : message["channelId"], "message": message["message"]})
         return jsonify({"messages": channel["messages"]}), 200
 
+#rooms  
+@app.route("/channels/create", methods=['POST'])
+def create_channel(data):
+       chat = chat_room(data['channelId'], data['chatName'], data['permissions'])
+       channelDict = {"channelId": data['channelId'], "chatroom": chat}
+       channels.insert_one({"channelId": data['channelId']})
 
 if __name__ == "__main__":
         app.run(debug=True)
