@@ -43,7 +43,7 @@ class Client:
         self.room = None
         self.channel = None
         self.channelName = None
-        self.sio = socketio.Client(logger=True, engineio_logger=False)
+        self.sio = socketio.Client()
 
         self.headers = {"Authentication": self.auth}
 
@@ -144,7 +144,6 @@ class Client:
         self.sio.emit("send_message", {"user": self.username, "content":message, "room": self.room}, namespace=f"/{self.channel}")
 
     def on_message(self, data):
-        print("zahir doesnt have a dad")
         author = data["user"]
         message = data["content"]
 
