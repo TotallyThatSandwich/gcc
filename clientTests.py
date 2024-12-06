@@ -37,17 +37,12 @@ class Client:
     #    return response["token"]
     
     async def connect(self):
-        self.sio.connect(f"ws://localhost:5000", namespaces=[f"/{self.channel}"], wait_timeout=10)
-        self.sio.wait()
-        return "Connected to server"
+        self.sio.connect(f"ws://localhost:5000/{self.channel}", wait_timeout=10)
     
     async def joinRoom(self, room):
-        
-        response = await self.sio.emit("join_room", {"room":room})
-        response = response.json()
+        print(f"Joining room {room}")
+        response = self.sio.call(event="on_join_room", data = {"room":room, "token":self.auth})
 
-        if response["status"] != 201:
-            raise Exception("Failed to join room")
         self.room = room
         return response
 
@@ -57,12 +52,10 @@ class Client:
 
 
     async def sendMessage(self, message):
-        if self.Room == None or self.channel == None:
+        if self.room == None or self.channel == None:
             return "Not in a room."
         
-        response = await self.sio.emit("send_message", {"content":message})
-        response = response.json()
-        return response
+        self.sio.emit("send_message", {"content":message})
 
     def getChannelFromId(self, channel):
         response = request("GET", f"http://localhost:5000/channels/{channel}", headers=self.headers)
@@ -76,9 +69,9 @@ async def main():
     client = Client(username, password)
     channel = await create_channel("general", "694201", {"read":True, "write":True})
     channel = client.getChannelFromId(channel="694201")
-    print(await client.connect())
+    await client.connect()
     print(await client.joinRoom("general"))
-    await client.sendMessage("Hello World!")
+    #await client.sendMessage("Hello World!")
     
 
 if __name__ == "__main__":

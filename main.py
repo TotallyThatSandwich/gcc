@@ -63,57 +63,61 @@ class chat_room(Namespace):
                 self.rooms = []
 
         # Basic methods
-        def check_auth(self, auth) -> bool:
-                try:
-                        if not auth.exists({"token": auth}):
-                                raise KeyError
-                        return True
-                except:
+        def check_auth(auth_token) -> bool:
+                if not auth.find({ "token": auth_token }):
                         return False
-                
+                return True
+                        
         def create_room(self, room):
                 self.rooms.append(room)
 
         def room_exists(self, room):
-                if room in self.rooms:
+                if self.room in rooms:
                         return True
                 return False
-        
+
+        @socket.on("send_message", namespace="/")
         def send_message(self, data):
                 room = data['room']
-                self.emit("receive_message", data, namespace=self, broadcast=True, to=room)
-        
+                print("sending message")
+                emit("receive_message", data, namespace="/", broadcast=True, to=room)
+
         # Connection
-        def join_room(self, data):
+        @socket.on("on_join_room", namespace="/")
+        def on_join_room(self, data):
                 """A function to join the user to a room.
 
                 Args:
-                    data (dict): A dictionary containing user information.
+                        data (dict): A dictionary containing user information.
                 """
                 room = data['room']
-                if not check_auth(data['token']):
-                       return emit("error", {"error": "Invalid credentials"}, namespace=self)
+                if not self.check_auth(data['token']):
+                        emit("error", {"error": "Invalid credentials"}, namespace="/")
+                        return {"status": 401, "message": "Invalid credentials"}
 
-                join_room(room=room, sid=data['token'], namespace=self)
-                self.emit("connection", f"connecting {data['username']} to room", to=room)
+                join_room(room=room, namespace="/")
+                emit("connection", f"connecting user to room: {room}", to=room, namespace="/")
                 return {"status": 200, "message": "Connected to room"}
 
+        @socket.on("leave_room", namespace="/")
         def on_leave_room(self, data):
                 """A function to disconnect the user from a room.
 
                 Args:
-                    data (dict): A dictionary containing user information.
+                        data (dict): A dictionary containing user information.
                 """
                 room = data['room']
-                if not check_auth(data['token']):
-                       return emit("error", jsonify({"error": "Invalid credentials"}, 401), namespace=self)
+                if not self.check_auth(data['token']):
+                        socket.emit("error", jsonify({"error": "Invalid credentials"}, 401), namespace="/")
+                        return {"status": 401, "message": "Invalid credentials"}
 
-                leave_room(room= room, sid=data['token'], namespace=self)
+                leave_room(room= room, sid=data['token'], namespace="/")
                 emit("connection", f"disconnecting {data['username']} from room", to=room)
                 
         # Messages
+        @socket.on("send_message", namespace="/")
         def on_messages(self, data):
-               print(data["content"])
+                print(data["content"])
 
 
 class user:
