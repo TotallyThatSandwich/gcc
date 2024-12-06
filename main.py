@@ -102,7 +102,7 @@ class chat_room(Namespace):
                 room = data['room']
                 try:
                         print(f"{data['user']} has sent message {data['content']} to room {room} \n")
-                        self.emit(event="receive_message",data=data, broadcast=True, to=room, include_self=True)
+                        emit("receive_message", data, broadcast=True, to=room, include_self=True)
                         return {"status": 200, "message": "Message sent"}
                 except:
                        return {"status": 500, "message": "Internal server error"}

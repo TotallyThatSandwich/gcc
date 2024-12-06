@@ -22,9 +22,11 @@ import settings
 username = settings.USERNAME
 password = settings.PASSWORD
 auth = settings.AUTH
+server = settings.SERVER
+
 
 async def create_channel(channelName:str, channelId:str, channelPerms:dict):
-    response = request("POST", "http://localhost:5000/channels/create", headers= {"Authorization": auth}, json={"channelName":channelName, "channelId":channelId, "channelPerms":channelPerms})
+    response = request("POST", f"{server}/channels/create", headers= {"Authorization": auth}, json={"channelName":channelName, "channelId":channelId, "channelPerms":channelPerms})
     response = response.json()
 
 class Client:
@@ -58,14 +60,14 @@ class Client:
 
     #def getAuth(self):
     #    hasPass = md5(password.encode()).hexdigest()
-    #    response = request("POST", "http://localhost:5000/getauth", json={"username":username, "passwordHash": hasPass})
+    #    response = request("POST", f"{server}/getauth", json={"username":username, "passwordHash": hasPass})
     #    response = response.json()
     #    print(hasPass)
     #    print(response)
     #    return response["token"]
 
     async def createChannel(self, channelName:str, channelId:str, channelPerms:dict):
-        response = request("POST", "http://localhost:5000/channels/create", headers= {"Authorization": self
+        response = request("POST", f"{server}/channels/create", headers= {"Authorization": self
         .auth}, json={"channelName":channelName, "channelId":channelId, "channelPerms":channelPerms})
 
         if response.status_code != 201:
@@ -73,7 +75,7 @@ class Client:
         return response
 
     async def signUp(self):
-        response = request("POST", "http://localhost:5000/user/new", json={"username":self.username,"email":self.email, "passwordHash": md5(self.password)})
+        response = request("POST", f"{server}/user/new", json={"username":self.username,"email":self.email, "passwordHash": md5(self.password)})
     
         if response.status_code != 201:
             return response["error"]
@@ -81,7 +83,7 @@ class Client:
         self.auth = response["token"]
 
     async def login(self):
-        response = request("POST", "http://localhost:5000/getauth", json={"username":self.username, "passwordHash": md5(self.password.encode('utf-8'))})
+        response = request("POST", f"{server}/getauth", json={"username":self.username, "passwordHash": md5(self.password.encode('utf-8'))})
 
         if response.status_code!=200:
             await self.signUp()
@@ -96,8 +98,8 @@ class Client:
             try:
                 self.sio.connect(f"ws://localhost:5000", wait_timeout=10, namespaces=[f"/{self.channel}"])
                 self.sio.on("connect", lambda: print("Connected to server!"))
-                self.sio.on("disconnect", self.on_disconnect)
-                self.sio.on("receive_message", self.on_message)
+                self.sio.on("disconnect", self.on_disconnect, namespace=f"/{self.channel}")
+                self.sio.on("receive_message", self.on_message, namespace=f"/{self.channel}")
                 self.console.rule("Connected to server!")
             except Exception as e:
                 self.console.print_exception()
@@ -107,8 +109,6 @@ class Client:
             
     # client commands
 
-    
-    
     async def joinRoom(self, room):
         self.console.print(f"[bold red]Joining[/bold red] [italic]{room}[/]")
         response = self.sio.call(event="join_room", data = {"room":room, "user": self.username, "token":self.auth}, namespace=f"/{self.channel}")
@@ -144,14 +144,14 @@ class Client:
         self.sio.emit("send_message", {"user": self.username, "content":message, "room": self.room}, namespace=f"/{self.channel}")
 
     def on_message(self, data):
-        print(data)
+        print("zahir doesnt have a dad")
         author = data["user"]
-        message = data["message"]
+        message = data["content"]
 
         self.console.print(self.prefix.format(username=author, time=datetime.now().strftime("%H:%M:%S")) + f" {message}")
 
     def getChannelFromId(self, channel):
-        response = request("GET", f"http://localhost:5000/channels/{channel}", headers=self.headers)
+        response = request("GET", f"{server}/channels/{channel}", headers=self.headers)
 
         if response.status_code != 200:
             print("Channel doesn't exist.")
@@ -174,14 +174,14 @@ async def user_input_loop(client: Client):
             await client.sendMessage(message)
 
 async def delete_channels():
-    response = request("DELETE", "http://localhost:5000/channels", headers= {"Authorization": auth})
+    response = request("DELETE", f"{server}/channels", headers= {"Authorization": auth})
 
     if response.status_code != 200:
         return response["error"]
     return response
 
 async def populate_channels():
-    response = request("POST", "http://localhost:5000/channels/populate", headers= {"Authorization": auth})
+    response = request("POST", f"{server}/channels/populate", headers= {"Authorization": auth})
 
     if response.status_code != 200:
         return response["error"]

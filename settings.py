@@ -11,3 +11,4 @@ USERNAME = os.getenv("USERNAME")
 PASSWORD = os.getenv("PASSWORD")
 AUTH = os.getenv("AUTH")
 
+SERVER = os.getenv("SERVER")
