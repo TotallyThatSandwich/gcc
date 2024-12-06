@@ -62,7 +62,35 @@ class chat_room(Namespace):
                 self.chat_name = chat_name
                 self.permissions = permissions
                 self.rooms:dict = {}
+                self.users = {}
                 print("Created namespace:", namespace)
+
+        def on_get_sid(self, data):
+                try:
+                        sid = self.users[data["content"]]
+                        return {"status": 200, "content": "Succesfully fetched user sid"} # fetches the sid from a user id
+                except:
+                        return {"status": 404, "content": "User not found"}
+               
+
+        def on_connect(self, auth):
+                print()
+                sid = request.sid
+                userId = auth["userId"]
+                
+                self.users.update({userId: sid})
+
+        def on_disconnect(self):
+                print("disconnected")
+                sid = request.sid
+                sids = list(self.users.values())
+                for user in sids:
+                       if user == sid:
+                               self.users.pop(list(self.users.keys())[sids.index(user)])
+                               return {"status": 200, "content": "Disconnected from channel"}
+                else:
+                        return {"status": 404, "content": "User not found"}
+
 
         # Basic methods
         def check_auth(self, auth_token) -> bool:
@@ -91,33 +119,53 @@ class chat_room(Namespace):
                 else:
                         return False
                 return True
-                
+        
+        def on_get_rooms(self):
+                sid = request.sid
+                self.send_message({"user": "gcc", "target": sid, "content": ", ".join(list(self.rooms.keys()))})
+                return {"status": 200, "content": list(self.rooms.keys())}
 
         def room_exists(self, room):
                 if self.room in rooms:
                         return True
                 return False
+        
+        def send_message(self, data):
+               target = data['target']
+               emit("receive_message", data, broadcast=True, to=target, include_self=True)
 
         def on_send_message(self, data):
-                room = data['room']
+                """Sends a message to users defined by the data sent.
+
+                Args:
+                    data (dict): A dictionary containing infomatino about the message.
+                        elements:
+                                ``user``: The name of the user sending the message.
+                                ``content``: The content of the message.
+                                ``target`` (optional): The room to send the message to.
+
+                Returns:
+                    dict: A dictionary containing the status of the message.
+                """
+                room = data['target']
                 try:
                         print(f"{data['user']} has sent message {data['content']} to room {room} \n")
                         emit("receive_message", data, broadcast=True, to=room, include_self=True)
-                        return {"status": 200, "message": "Message sent"}
+                        return {"status": 200, "content": "Message sent"}
                 except:
-                       return {"status": 500, "message": "Internal server error"}
+                       return {"status": 500, "content": "Internal server error"}
 
         # Connection
         def on_join_room(self, data):
                 """A function to join the user to a room.
 
                 Args:
-                        data (dict): A dictionary containing user information.
+                        data (dict): A dictionary containing user information. Should contain ``{room: room}``]
                 """
                 room = data['room']
                 if not self.check_auth(data['token']):
                         emit("error", {"error": "Invalid credentials"})
-                        return {"status": 401, "message": "Invalid credentials"}
+                        return {"status": 401, "content": "Invalid credentials"}
 
                 join_room(room=room)
                 emit("connection", f"connecting user to room: {room}", to=room)
@@ -127,7 +175,7 @@ class chat_room(Namespace):
                        self.create_room(room)
                 self.rooms[room]["users"].append(data["user"])
 
-                return {"status": 200, "content": {"message": "Connected to room", "users": self.rooms[room]["users"]}}
+                return {"status": 200, "content": {"content": "Connected to room", "users": self.rooms[room]["users"]}}
 
         def on_leave_room(self, data):
                 """A function to disconnect the user from a room.
@@ -136,13 +184,10 @@ class chat_room(Namespace):
                         data (dict): A dictionary containing user information.
                 """
                 room = data['room']
-                if not self.check_auth(data['token']):
-                        socket.emit("error", jsonify({"status":401, "error": "Invalid credentials"}))
-                        return {"status": 401, "message": "Invalid credentials"}
-
                 leave_room(room=room)
+                self.rooms[room]["users"].remove(data["user"])
                 emit("connection", f"disconnecting user from room: {room}", to=room)
-                return {"status": 200, "content": {"message": "Disconnected from room"}}
+                return {"status": 200, "content": {"content": "Disconnected from room"}}
                 
         # Messages
         def on_messages(self, data):
