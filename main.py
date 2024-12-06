@@ -1,3 +1,4 @@
+import asyncio
 import pymongo as pm
 import json
 from flask import Flask, jsonify, request
@@ -61,6 +62,7 @@ class chat_room(Namespace):
                 self.chat_name = chat_name
                 self.permissions = permissions
                 self.rooms:dict = {}
+                print("Created namespace:", namespace)
 
         # Basic methods
         def check_auth(self, auth_token) -> bool:
@@ -96,10 +98,14 @@ class chat_room(Namespace):
                         return True
                 return False
 
-        def send_message(self, data):
+        def on_send_message(self, data):
                 room = data['room']
-                print(f"user has sent message {data['content']} to room {room}")
-                emit("receive_message", data, broadcast=True, to=room)
+                try:
+                        print(f"{data['user']} has sent message {data['content']} to room {room} \n")
+                        self.emit(event="receive_message",data=data, broadcast=True, to=room, include_self=True)
+                        return {"status": 200, "message": "Message sent"}
+                except:
+                       return {"status": 500, "message": "Internal server error"}
 
         # Connection
         def on_join_room(self, data):
@@ -116,9 +122,10 @@ class chat_room(Namespace):
                 join_room(room=room)
                 emit("connection", f"connecting user to room: {room}", to=room)
 
-                if room not in self.rooms:
+                if room not in list(self.rooms.keys()):
+                       print("\nRoom does not exist, creating room")
                        self.create_room(room)
-                self.room[room]["users"].append(data["author"])
+                self.rooms[room]["users"].append(data["user"])
 
                 return {"status": 200, "content": {"message": "Connected to room", "users": self.rooms[room]["users"]}}
 
@@ -130,7 +137,7 @@ class chat_room(Namespace):
                 """
                 room = data['room']
                 if not self.check_auth(data['token']):
-                        socket.emit("error", jsonify({"error": "Invalid credentials"}, 401))
+                        socket.emit("error", jsonify({"status":401, "error": "Invalid credentials"}))
                         return {"status": 401, "message": "Invalid credentials"}
 
                 leave_room(room=room)
@@ -176,6 +183,7 @@ def check_auth():
 
 @app.route('/getauth', methods=['POST'])
 def post_auth():
+        print("getting auth")
         data = request.get_json()
         user = auth.find_one({ "username": data["username"], "passwordHash": data["passwordHash"] })
         if user is None:
@@ -186,6 +194,7 @@ def post_auth():
 # user
 @app.route('/user/new', methods=['POST'])
 def post_user():
+        print("creating user")
         data = request.get_json()
         user = users.find_one({ "username": data["username"] })
         if user is not None:
@@ -277,13 +286,17 @@ def get_channels():
 def get_channel(channelId):
         channel = channels.find_one({"channelId": channelId})
         headers = request.headers
-        if headers.get('Authorization') is not None:
-            token = headers.get('Authorization')
-            auth_user = auth.find_one({ "token": token })
+
+
+        """ if headers.get('Authorization') is not None:
+                token = headers.get('Authorization')
+                auth_user = auth.find_one({ "token": token })
+            
             if auth_user is None:
-                return jsonify({"error": "Invalid token"}), 401
+                return jsonify({"error": "Invalid token"}), 401"""
+        
         if channel is None:
-                return jsonify({"error": "Channel not found"}), 404
+                return jsonify({"error": "Channel not found"}), 404 
         return jsonify({"channelId": channel["channelId"], "channelName": channel["channelName"]}), 200
 
 #messages
@@ -320,6 +333,7 @@ def get_messages(channelId):
 
 @app.route('/channels', methods=['DELETE'])
 def delete_channels():
+        print("deleting channels")
         for channel in channels.find():
                 channels.delete_one({ "channelId": channel["channelId"] })
         return jsonify({"message": "Channel deleted"}), 200
@@ -339,6 +353,11 @@ def create_channel():
         socket.on_namespace(chat)
         return jsonify(channelDict), 201
 
+@app.route("/channels/populate", methods=['POST'])
+def populate_channels():
+        create_chat_rooms()
+        return jsonify({"message": "Populated channels"}), 200
+
 
 @socket.on("hello_world", namespace="/test")
 def on_test(data):
@@ -356,9 +375,13 @@ def create_chat_rooms():
         Args:
             channels (collection): A raw collection of chat elements found in the database.
         """
-        channels = channels.find()
+        namespaces = channels.find()
         print(channels)
-        for channel in channels:
+        for channel in namespaces:
+                if channel['channelId'] in list(rooms.keys()):
+                        continue
+        
+                print("channel", channel)
                 chat = chat_room(f"/{channel['channelId']}", channel["channelName"], channel["channelPerms"])
                 rooms.update({channel["channelId"] : chat})
                 socket.on_namespace(chat)
@@ -366,4 +389,7 @@ def create_chat_rooms():
 
 
 if __name__ == "__main__":
-        app.run(debug=True)
+        asyncio.run(app.run(debug=True))
+        
+        
+        
