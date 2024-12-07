@@ -7,6 +7,7 @@ import socketio
 from uuid import uuid4
 
 from rich import print as rprint
+from rich.pretty import pprint
 from rich.live import Live
 from rich.console import Console
 from rich.progress import Progress
@@ -40,10 +41,13 @@ class Client:
         self.email = email
 
         # user data
+        self.room = None
         self.target = None
         self.channel = None
         self.channelName = None
         self.sio = socketio.Client()
+
+        self.dataScheme = {"event": None, "data": {"target": None, "user": self.username, "userId": self.userId, "content": None}, "namespace": None}
 
         self.headers = {"Authentication": self.auth}
 
@@ -57,15 +61,12 @@ class Client:
             "/join": lambda self: asyncio.create_task(self.joinRoom(self.console.input("[italic]Enter room name[/italic]: "))),
             "/create": lambda self: asyncio.create_task(self.createChannel(self.console.input("[italic]Enter channel name[/italic]: "), str(uuid4()), {})),
             "/rooms": lambda self: self.get_rooms(),
+            "/users": lambda self: asyncio.create_task(self.get_users())
     }
-
-    #def getAuth(self):
-    #    hasPass = md5(password.encode()).hexdigest()
-    #    response = request("POST", f"{server}/getauth", json={"username":username, "passwordHash": hasPass})
-    #    response = response.json()
-    #    print(hasPass)
-    #    print(response)
-    #    return response["token"]
+        
+    def updateSchema(self):
+        self.dataScheme.update({"data": {"user": self.username, "userId": self.userId, "token": self.auth, "content": None}})
+        return self.dataScheme
 
     async def createChannel(self, channelName:str, channelId:str, channelPerms:dict):
         response = request("POST", f"http://{server}/channels/create", headers= {"Authorization": self
@@ -74,6 +75,22 @@ class Client:
         if response.status_code != 201:
             return response["error"]
         return response
+    
+    async def get_users(self):
+        if self.target == None:
+            target = self.room
+        else:
+            target = self.target
+
+        data = {"target": target}
+        response = self.sio.call("get_users", data=data, namespace=f"/{self.channel}")
+
+        if response["status"] != 200:
+            return response["content"]
+        inRoom = response["content"]["room"]
+        activeUsers = response["content"]["online"]
+        
+        # self.console.print("Room:", inRoom, "Channel:", activeUsers)
 
     async def signUp(self):
         response = request("POST", f"http://{server}/user/new", json={"username":self.username,"email":self.email, "passwordHash": md5(self.password.encode()).hexdigest()})
@@ -92,6 +109,13 @@ class Client:
         
         response = response.json()
         self.auth = response["token"]
+
+        response = request("GET", f"http://{server}/userfromname/{self.username}", headers=self.headers)
+        
+        if response.status_code != 200:
+            return response["error"]
+        response = response.json()
+        self.userId = response["userId"]
 
     
     async def connect(self):
@@ -124,22 +148,22 @@ class Client:
         if self.target != None:
             self.leaveRoom()
         self.console.print(f"[bold red]Joining[/bold red] [italic]{room}[/]")
-        response = self.sio.call(event="join_room", data = {"room":room, "user": self.username, "token":self.auth}, namespace=f"/{self.channel}")
+        response = self.sio.call(event="join_room", data = {"room":room, "user": self.username, "userId": self.userId, "token":self.auth}, namespace=f"/{self.channel}")
 
         if response["status"] != 200:
             return response["content"]
         
-        self.target = room
+        self.room = room
         print(response)
-        self.console.rule(f"[bold red]{self.target}[/bold red]")
+        self.console.rule(f"[bold red]{self.room}[/bold red]")
         return f"Successfully joined room {room} with {response['content']['users']}"
 
     def leaveRoom(self):
-        response = self.sio.emit("leave_room", {"user": self.username, "room":self.target}, namespace=f"/{self.channel}")
+        response = self.sio.emit("leave_room", {"user": self.username, "userId": self.userId, "room":self.room}, namespace=f"/{self.channel}")
 
         if response['status'] != 200:
             return response['content']
-        self.target = None
+        self.room = None
         return response
     
     def getUserSId(self, userId=None, user=None):
@@ -155,8 +179,12 @@ class Client:
         response = self.sio.call("get_sid", {"content": userId}, namespace=f"/{self.channel}")
     
     async def sendMessage(self, message):
+
         if self.target == None:
-            return "Not in a room."
+            if self.room == None:
+                return "Not in a room."
+            target = self.room
+
         if message[0] == "/":
             if message in list(self.commands.keys()):
                 return self.commands[message](self)

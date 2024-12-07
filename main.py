@@ -65,34 +65,114 @@ class chat_room(Namespace):
                 self.users = {}
                 print("Created namespace:", namespace)
 
-        def on_get_sid(self, data):
+        def fetch_usernames_from_ids(self, ids=None) -> list[str]:
+                """Fetches usernames from user IDs connected to the channel.
+
+                Args:
+                    ids (list): A list of user IDs to fetch usernames from.
+
+                Returns:
+                    list: A list of usernames.
+                """
+                usernames = []
+                for user in ids:
+                        usernames.append(self.users[user]["username"])
+                return usernames
+
+        def fetch_usernames_from_dict(self, users:list[dict]) -> list[str]:
+                """Fetches usernames from a dictionary of user IDs.
+
+                Args:
+                    users (list[dict]): A list of dictionaries containing user infomation.
+                    [{"sid": sid, "username": username}]
+
+                Returns:
+                    list: A list of usernames.
+                """
+                usernames = []
                 try:
-                        sid = self.users[data["content"]]
-                        return {"status": 200, "content": "Succesfully fetched user sid"} # fetches the sid from a user id
+                        for user in users:
+                                usernames.append(user["username"])
+                except Exception as e:
+                        print(e)
+                        return []
+                return usernames
+
+        def on_get_sid(self, data):
+                """Fetches the session ID of a user from their user ID.
+
+                Args:
+                    data (dict): a dictionary containing ``{"content": userId} or {"content": username}``
+
+                Returns:
+                    dict: A response containing the status of the request and the session ID of the user if found.
+                """
+                try:
+                        sid = self.users[data["content"]] # fetches the sid from a user id
+                        return {"status": 200, "content": sid} # fetches the sid from a user id
                 except:
                         return {"status": 404, "content": "User not found"}
                
+               
+        def on_get_users(self, data):
+                """Fetches the users in the channel.
+
+                Args:
+                    data (dict): A dictionary containing the room name.
+
+                Returns:
+                    dict: A response containing the status of the request and a list of users in the room.
+                """
+                room = data["target"]
+                
+                active_users = [] # outside of room
+                users_in_room:list[dict] = self.rooms[room]["users"] # inside of room
+                for user in self.users:
+                        if user not in users_in_room:
+                                active_users.append(user)
+
+                # for user in self.users:
+                #         if user in self.rooms[room]["users"]:
+                #                 users_in_room.append(user["username"])
+                #         else:
+                #                 active_users.append(user["username"])
+                print(users_in_room)
+
+                usernames_in_room = self.fetch_usernames_from_dict(users_in_room)
+                print(usernames_in_room)
+                usernames_active = self.fetch_usernames_from_dict(active_users)
+                print(usernames_active)
+
+                content = f"room: {', '.join(usernames_in_room)}\nchannel: {', '.join(usernames_active)}"
+                self.send_message({"user": "gcc", "target": request.sid, "content": content})
+
+                if room not in list(self.rooms.keys()):
+                        return {"status": 404, "content": "Room not found"}
+                return {"status": 200, "content": {"room": users_in_room, "online": active_users}}
 
         def on_connect(self, auth):
                 print()
                 sid = request.sid
                 userId = auth["userId"]
                 
-                self.users.update({userId: sid})
+                self.users.update({userId: {"sid": sid, "username": auth["user"]}})
 
         def on_disconnect(self):
                 print("disconnected")
                 sid = request.sid
-                sids = list(self.users.values())
-                for user in sids:
-                       if user == sid:
-                               self.users.pop(list(self.users.keys())[sids.index(user)])
-                               return {"status": 200, "content": "Disconnected from channel"}
+
+                for user in list(self.users.keys()):
+                        print(user)
+                        if self.users[user]["sid"] == sid:
+                                self.users.pop(user)
+                                break
+                        for room in self.rooms:
+                                if user in self.rooms[room]["users"]:
+                                        self.rooms[room]["users"].remove(user)
+                                        break
                 else:
                         return {"status": 404, "content": "User not found"}
 
-
-        # Basic methods
         def check_auth(self, auth_token) -> bool:
                 if not auth.find({ "token": auth_token }):
                         return False
@@ -162,6 +242,7 @@ class chat_room(Namespace):
                 Args:
                         data (dict): A dictionary containing user information. Should contain ``{room: room}``]
                 """
+
                 room = data['room']
                 if not self.check_auth(data['token']):
                         emit("error", {"error": "Invalid credentials"})
@@ -173,7 +254,8 @@ class chat_room(Namespace):
                 if room not in list(self.rooms.keys()):
                        print("\nRoom does not exist, creating room")
                        self.create_room(room)
-                self.rooms[room]["users"].append(data["user"])
+
+                self.rooms[room]["users"].append(self.users[data["userId"]])
 
                 return {"status": 200, "content": {"content": "Connected to room", "users": self.rooms[room]["users"]}}
 
@@ -185,24 +267,13 @@ class chat_room(Namespace):
                 """
                 room = data['room']
                 leave_room(room=room)
-                self.rooms[room]["users"].remove(data["user"])
+                self.rooms[room]["users"].remove(data["userId"])
                 emit("connection", f"disconnecting user from room: {room}", to=room)
                 return {"status": 200, "content": {"content": "Disconnected from room"}}
                 
         # Messages
         def on_messages(self, data):
                 print(data["content"])
-
-
-class user:
-        def __init__(self, username:str, email:str, userId:str, channel:chat_room):
-                self.username = username
-                self.email = email
-                self.userId = userId
-                self.channel:chat_room = None
-
-        def join_channel(self, channel):
-                pass
 
 
 def generate_token():
