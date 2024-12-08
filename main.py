@@ -1,5 +1,6 @@
 import asyncio
 import pymongo as pm
+from pymongo import collection
 import json
 from flask import Flask, jsonify, request
 from flask_socketio import SocketIO, send, emit, Namespace, join_room, leave_room
@@ -11,10 +12,10 @@ import uuid
 
 client = pm.MongoClient(settings.MONGO_ADDRESS, username=settings.MONGO_USER, password=settings.MONGO_PASS)
 db = client["db"]
-auth = db["auth"]
-users = db["users"]
-channels = db["channels"]
-messages = db["messages"]
+auth:collection.Collection = db["auth"]
+users:collection.Collection = db["users"]
+channels:collection.Collection = db["channels"]
+messages:collection.Collection = db["messages"]
 
 app = Flask(__name__)
 cors = CORS(app)
@@ -41,6 +42,26 @@ class chat_room(Namespace):
                 ``room_exists``: Checks if a room exists in the channel.
                         args:
                                 room (str): The room name to check.
+
+                ``send_message``: Sends a server side message to all users in the channel.
+
+                ``fetch_usernames_from_ids``: Fetches usernames from user IDs connected to the channel.
+
+                ``fetch_usernames_from_dict``: Fetches usernames from a dictionary of user IDs.
+
+                ``on_get_sid``: Fetches the session ID of a user from their user ID.
+
+                ``on_get_users``: Fetches the users in the channel.
+
+                ``on_connect``: Connects the user to the channel.
+
+                ``on_disconnect``: Disconnects the user from the channel.
+
+                ``on_send_message``: Sends a message to all users in the channel.
+
+                ``on_join_room``: Connects the user to a channel.
+
+                ``on_leave_room``: Disconnects the user from a channel.
         
         Events:
                 ``on_send_message``: Sends a message to all users in the channel.
@@ -292,9 +313,12 @@ def generate_user_id():
 @app.route('/checkauth', methods=['GET'])
 def check_auth():
         headers = request.headers
-        user = auth.find_one({ "token": headers.get('Authorization') })
-        if user is None:
+
+        if headers.get('Authorization') is None:
                 return jsonify({"error": "Invalid token"}), 401
+        
+        user = auth.find_one({ "token": headers.get('Authorization') })
+
         return jsonify({"token": user["token"]}), 200
 
 @app.route('/getauth', methods=['POST'])
@@ -325,10 +349,13 @@ def post_user():
 def get_user_from_id(userId):
         user = users.find_one({ "userId": userId })
         headers = request.headers
-        if headers.get('Authorization') is not None:
-            token = headers.get('Authorization')
-            auth_user = auth.find_one({ "token": token })
-            if auth_user is None:
+        if headers.get('Authorization') is None:
+                return jsonify({"error": "Invalid token"}), 401
+        
+        token = headers.get('Authorization')
+        auth_user = auth.find_one({ "token": token })
+
+        if auth_user is None:
                 return jsonify({"error": "Invalid token"}), 401
         if user is None:
                 return jsonify({"error": "User not found"}), 404
@@ -338,10 +365,13 @@ def get_user_from_id(userId):
 def get_user_from_name(userName):
         user = users.find_one({ "username": userName })
         headers = request.headers
-        if headers.get('Authorization') is not None:
-            token = headers.get('Authorization')
-            auth_user = auth.find_one({ "token": token })
-            if auth_user is None:
+        if headers.get('Authorization') is None:
+                return jsonify({"error": "Invalid token"}), 401
+        
+        token = headers.get('Authorization')
+        auth_user = auth.find_one({ "token": token })
+
+        if auth_user is None:
                 return jsonify({"error": "Invalid token"}), 401
         if user is None:
                 return jsonify({"error": "User not found"}), 404
@@ -351,10 +381,13 @@ def get_user_from_name(userName):
 def get_users():
         users_list = []
         headers = request.headers
-        if headers.get('Authorization') is not None:
-            token = headers.get('Authorization')
-            auth_user = auth.find_one({ "token": token })
-            if auth_user is None:
+        if headers.get('Authorization') is None:
+                return jsonify({"error": "Invalid token"}), 401
+        
+        token = headers.get('Authorization')
+        auth_user = auth.find_one({ "token": token })
+
+        if auth_user is None:
                 return jsonify({"error": "Invalid token"}), 401
         for user in users.find():
                 users_list.append({"username": user["username"], "userId": user["userId"]})
@@ -370,32 +403,20 @@ def get_users():
 
 
 # channels
-@app.route('/channels', methods=['POST'])
-def post_channel():
-        data = request.get_json()
-        channel = channels.find_one({ "channelId": data["channelId"] })
-        headers = request.headers
-        if headers.get('Authorization') is not None:
-            token = headers.get('Authorization')
-            auth_user = auth.find_one({ "token": token })
-            if auth_user is None:
-                return jsonify({"error": "Invalid token"}), 401
-        if channel is not None:
-                return jsonify({"error": "Channel already exists"}), 400
-        channels.insert_one({"channelId": data["channelId"], "channelName": data["channelName"]})
-        return jsonify({"channelId": data["channelId"], "channelName": data["channelName"]}), 201
-
 @app.route('/channels', methods=['GET'])
 def get_channels():
         channels_list = []
         headers = request.headers
-        if headers.get('Authorization') is not None:
-            token = headers.get('Authorization')
-            auth_user = auth.find_one({ "token": token })
-            if auth_user is None:
+        if headers.get('Authorization') is None:
                 return jsonify({"error": "Invalid token"}), 401
+        
+        token = headers.get('Authorization')
+        auth_user = auth.find_one({ "token": token })
+        if auth_user is None:
+                return jsonify({"error": "Invalid token"}), 401
+        
         for channel in channels.find():
-                channels_list.append({"channelId": channel["channelId"]})
+                channels_list.append({"channelId": channel["channelId"], "channelName": channel["channelName"], "channelPerms": channel["channelPerms"]})
         return jsonify({"channels": channels_list}), 200
 
 @app.route('/channels/<channelId>', methods=['GET'])
@@ -403,49 +424,84 @@ def get_channel(channelId):
         channel = channels.find_one({"channelId": channelId})
         headers = request.headers
 
+        if headers.get('Authorization') is None:
+                return jsonify({"error": "Invalid token"}), 401
+        
+        token = headers.get('Authorization')
+        auth_user = auth.find_one({ "token": token })
 
-        """ if headers.get('Authorization') is not None:
-                token = headers.get('Authorization')
-                auth_user = auth.find_one({ "token": token })
-            
-            if auth_user is None:
-                return jsonify({"error": "Invalid token"}), 401"""
+        if auth_user is None:
+                return jsonify({"error": "Invalid token"}), 401
         
         if channel is None:
                 return jsonify({"error": "Channel not found"}), 404 
-        return jsonify({"channelId": channel["channelId"], "channelName": channel["channelName"]}), 200
+        return jsonify({"channelId": channel["channelId"], "channelName": channel["channelName"], "channelPerms": channel["channelPerms"]}), 200
 
 #messages
-@app.route('/channels/<channelId>/messages', methods=['POST'])
-def post_message(channelId):
-        data = request.get_json()
-        channel = channels.find_one({ "channelId": channelId })
-        headers = request.headers
-        if headers.get('Authorization') is not None:
-            token = headers.get('Authorization')
-            auth_user = auth.find_one({ "token": token })
-            if auth_user is None:
-                return jsonify({"error": "Invalid token"}), 401
-        if channel is None:
-                return jsonify({"error": "Channel not found"}), 404
-        messages.insert_one({ "channelId": channelId, "message": data["message"], "timestamp": data["timestamp"], "sentuser": users.find_one({ "userId": data["userId"] }) })
-        return jsonify({"message": data["message"]}), 201
-
 @app.route('/channels/<channelId>/messages', methods=['GET'])
 def get_messages(channelId):
-        channel = channels.find_one({ "channelId": channelId })
-        messagelist = []
+        channel = channels.find_one({"channelId": channelId})
         headers = request.headers
-        if headers.get('Authorization') is not None:
-            token = headers.get('Authorization')
-            auth_user = auth.find_one({ "token": token })
-            if auth_user is None:
+        messageId = request.args.get('messageId')
+        room = request.args.get('room')
+
+        if headers.get('Authorization') is None:
                 return jsonify({"error": "Invalid token"}), 401
+        
+        token = headers.get('Authorization')
+        auth_user = auth.find_one({ "token": token })
+
+        if auth_user is None:
+                return jsonify({"error": "Invalid token"}), 401
+        
         if channel is None:
                 return jsonify({"error": "Channel not found"}), 404
-        for message in messages.find({}):
-                messagelist.append({"channelId" : message["channelId"], "message": message["message"]})
-        return jsonify({"messages": channel["messages"]}), 200
+        
+        messages_list = messages.find({"channelId": channelId, "room": room})\
+                        .sort("messageId", pm.DESCENDING)\
+                        .skip(messages.count_documents() - messageId)\
+                        .limit(100)
+        
+        return jsonify({"messages": messages_list.to_list()}), 200
+
+@app.route('/channels/<channelId>/messages', methods=['POST'])
+def send_message(channelId):
+        data = request.get_json()
+        channel = channels.find_one({"channelId": channelId})
+        headers = request.headers
+
+        if headers.get('Authorization') is None:
+                return jsonify({"error": "Invalid token"}), 401
+        
+        token = headers.get('Authorization')
+        auth_user = auth.find_one({ "token": token })
+
+        if auth_user is None:
+                return jsonify({"error": "Invalid token"}), 401
+        
+        if channel is None:
+                return jsonify({"error": "Channel not found"}), 404
+        
+        messageId = messages.count_documents() + 1
+        data.update({"messageId": messageId})
+        messages.insert_one(data)
+
+        room:chat_room = rooms[channelId]
+        room.on_send_message(data=data)
+
+        return data, 201
+
+def get_message_by_id(messageId:int) -> dict:
+        message = messages.find_one({"messageId": messageId})
+        if message is None:
+                return jsonify({"error": "Message not found"}), 404
+        return jsonify(message), 200
+
+@app.route('/messages/<messageId>', methods=['GET'])
+def get_message(messageId):
+        return get_message_by_id(messageId)
+
+
 
 @app.route('/channels', methods=['DELETE'])
 def delete_channels():
@@ -464,6 +520,8 @@ def create_channel():
         chat = chat_room(f"/{data['channelId']}", data['channelName'], data['channelPerms'])
         print(chat.namespace)
         channelDict = {"channelId": data['channelId'], "channelName": data['channelName'], "channelPerms": data['channelPerms']}
+        if channels.find_one({"channelId": data['channelId']}) is not None:
+                return jsonify({"error": "Channel already exists"}), 400
         channels.insert_one({"channelId": data['channelId'], "channelName": data['channelName'], "channelPerms": data['channelPerms']})
 
         socket.on_namespace(chat)

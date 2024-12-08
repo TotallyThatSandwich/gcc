@@ -197,7 +197,7 @@ class Client:
         else:
             target = self.target
 
-        self.sio.emit("send_message", {"user": self.username, "content":message, "target": target}, namespace=f"/{self.channel}")
+        {"user": self.username, "content":message, "target": target, "targetMessage": None}, namespace=f"/{self.channel}"
 
     def on_message(self, data):
         author = data["user"]
