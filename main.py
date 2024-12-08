@@ -309,6 +309,9 @@ def generate_user_id():
                 generated_id = str(uuid.uuid4())
         return generated_id
 
+def dictify(collection):
+        return json.loads(json.dumps(collection, default=str))
+
 #auth
 @app.route('/checkauth', methods=['GET'])
 def check_auth():
@@ -328,7 +331,7 @@ def post_auth():
         user = auth.find_one({ "username": data["username"], "passwordHash": data["passwordHash"] })
         if user is None:
                 return jsonify({"error": "Invalid credentials"}), 401
-        return jsonify(user), 200
+        return jsonify({"token": user["token"]}), 200
 
 
 # user
@@ -347,7 +350,7 @@ def post_user():
 
 @app.route('/userfromid/<userId>', methods=['GET'])
 def get_user_from_id(userId):
-        user = users.find_one({ "userId": userId })
+        user = users.find_one({"userId": userId})
         headers = request.headers
         if headers.get('Authorization') is None:
                 return jsonify({"error": "Invalid token"}), 401
@@ -375,7 +378,7 @@ def get_user_from_name(userName):
                 return jsonify({"error": "Invalid token"}), 401
         if user is None:
                 return jsonify({"error": "User not found"}), 404
-        return jsonify(user), 200
+        return jsonify(dictify(user)), 200
 
 @app.route('/users', methods=['GET'])
 def get_users():
@@ -426,16 +429,17 @@ def get_channel(channelId):
 
         if headers.get('Authorization') is None:
                 return jsonify({"error": "Invalid token"}), 401
+                print("gay")
         
         token = headers.get('Authorization')
-        auth_user = auth.find_one({ "token": token })
+        auth_user = auth.find_one({"token": token})
 
         if auth_user is None:
                 return jsonify({"error": "Invalid token"}), 401
         
         if channel is None:
                 return jsonify({"error": "Channel not found"}), 404 
-        return jsonify(channel), 200
+        return jsonify(dictify(channel)), 200
 
 #messages
 @app.route('/channels/<channelId>/messages', methods=['GET'])
@@ -540,7 +544,7 @@ def on_greetings(data):
         emit("greetings", "Herro world!")
 
 
-async def create_chat_rooms():
+def create_chat_rooms():
         """Generates chat room classes of database information.
 
         Args:

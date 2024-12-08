@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 import os
 
-load_dotenv()
+load_dotenv(override=True)
 
 MONGO_USER = os.getenv("MONGO-USER")
 MONGO_PASS = os.getenv("MONGO-PASS")
