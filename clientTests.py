@@ -197,7 +197,8 @@ class Client:
         else:
             target = self.target
 
-        {"user": self.username, "content":message, "target": target, "targetMessage": None}, namespace=f"/{self.channel}"
+        body = {"target": target, "user": self.username, "userId": self.userId, "content": message, "timestamp": datetime.now().strftime(), "targetMessage": None}
+        response = request("GET", f"http://{server}/channels/{self.channelId}/messages", headers=self.headers, body=body)
 
     def on_message(self, data):
         author = data["user"]

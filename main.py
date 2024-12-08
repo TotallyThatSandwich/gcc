@@ -319,7 +319,7 @@ def check_auth():
         
         user = auth.find_one({ "token": headers.get('Authorization') })
 
-        return jsonify({"token": user["token"]}), 200
+        return jsonify(user), 200
 
 @app.route('/getauth', methods=['POST'])
 def post_auth():
@@ -328,7 +328,7 @@ def post_auth():
         user = auth.find_one({ "username": data["username"], "passwordHash": data["passwordHash"] })
         if user is None:
                 return jsonify({"error": "Invalid credentials"}), 401
-        return jsonify({"token": user["token"]}), 200
+        return jsonify(user), 200
 
 
 # user
@@ -343,7 +343,7 @@ def post_user():
         token = str(generate_token())
         users.insert_one({ "username": data["username"], "email": data["email"], "userId": user_id })
         auth.insert_one({ "username": data["username"], "passwordHash": data["passwordHash"], "token": token })
-        return jsonify({"token": token}), 201
+        return jsonify({ "username": data["username"], "passwordHash": data["passwordHash"], "token": token }), 201
 
 @app.route('/userfromid/<userId>', methods=['GET'])
 def get_user_from_id(userId):
@@ -359,7 +359,7 @@ def get_user_from_id(userId):
                 return jsonify({"error": "Invalid token"}), 401
         if user is None:
                 return jsonify({"error": "User not found"}), 404
-        return jsonify({"username": user["username"], "userId": user["userId"]}), 200
+        return jsonify(user), 200
 
 @app.route('/userfromname/<userName>', methods=['GET'])
 def get_user_from_name(userName):
@@ -375,7 +375,7 @@ def get_user_from_name(userName):
                 return jsonify({"error": "Invalid token"}), 401
         if user is None:
                 return jsonify({"error": "User not found"}), 404
-        return jsonify({"username": user["username"], "userId": user["userId"]}), 200
+        return jsonify(user), 200
 
 @app.route('/users', methods=['GET'])
 def get_users():
@@ -435,7 +435,7 @@ def get_channel(channelId):
         
         if channel is None:
                 return jsonify({"error": "Channel not found"}), 404 
-        return jsonify({"channelId": channel["channelId"], "channelName": channel["channelName"], "channelPerms": channel["channelPerms"]}), 200
+        return jsonify(channel), 200
 
 #messages
 @app.route('/channels/<channelId>/messages', methods=['GET'])
@@ -491,15 +491,12 @@ def send_message(channelId):
 
         return data, 201
 
-def get_message_by_id(messageId:int) -> dict:
+@app.route('/messages/<messageId>', methods=['GET'])
+def get_message(messageId):
         message = messages.find_one({"messageId": messageId})
         if message is None:
                 return jsonify({"error": "Message not found"}), 404
         return jsonify(message), 200
-
-@app.route('/messages/<messageId>', methods=['GET'])
-def get_message(messageId):
-        return get_message_by_id(messageId)
 
 
 
@@ -543,7 +540,7 @@ def on_greetings(data):
         emit("greetings", "Herro world!")
 
 
-def create_chat_rooms():
+async def create_chat_rooms():
         """Generates chat room classes of database information.
 
         Args:
@@ -564,6 +561,7 @@ def create_chat_rooms():
 
 if __name__ == "__main__":
         asyncio.run(app.run(debug=True))
+        asyncio.run(create_chat_rooms())
         
         
         
