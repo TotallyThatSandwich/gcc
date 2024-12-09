@@ -49,7 +49,7 @@ class Client:
 
         self.dataScheme = {"event": None, "data": {"target": None, "user": self.username, "userId": self.userId, "content": None}, "namespace": None}
 
-        self.headers = {"Authentication": self.auth}
+        self.headers = {"Authorization": self.auth}
 
         self.console = Console()
 
@@ -73,7 +73,7 @@ class Client:
         .auth}, json={"channelName":channelName, "channelId":channelId, "channelPerms":channelPerms})
 
         if response.status_code != 201:
-            return response["error"]
+            return response.json()["error"]
         return response
     
     async def get_users(self):
@@ -96,7 +96,7 @@ class Client:
         response = request("POST", f"http://{server}/user/new", json={"username":self.username,"email":self.email, "passwordHash": md5(self.password.encode()).hexdigest()})
     
         if response.status_code != 201:
-            return response["error"]
+            return response.json()["error"]
         response = response.json()
         self.auth = response["token"]
 
@@ -113,7 +113,8 @@ class Client:
         response = request("GET", f"http://{server}/userfromname/{self.username}", headers=self.headers)
         
         if response.status_code != 200:
-            return response["error"]
+            print(response)
+            return response.json()["error"]
         response = response.json()
         self.userId = response["userId"]
 
@@ -173,7 +174,7 @@ class Client:
         if userId == None:
             response = request("GET", f"http://{server}/userfromname/{user}", headers=self.headers)
             if response.status_code != 200:
-                return response["error"]
+                return response.json()["error"]
             userId = response.json()["userId"]
 
         response = self.sio.call("get_sid", {"content": userId}, namespace=f"/{self.channel}")
@@ -197,7 +198,8 @@ class Client:
         else:
             target = self.target
 
-        {"user": self.username, "content":message, "target": target, "targetMessage": None}, namespace=f"/{self.channel}"
+        body = {"target": target, "user": self.username, "userId": self.userId, "content": message, "timestamp": datetime.now().strftime(), "targetMessage": None}
+        response = request("GET", f"http://{server}/channels/{self.channelId}/messages", headers=self.headers, json=body)
 
     def on_message(self, data):
         author = data["user"]
