@@ -9,6 +9,7 @@ import settings
 import binascii
 import os
 import uuid
+from marshmallow import Schema, fields, ValidationError, validates, EXCLUDE, INCLUDE, validate
 
 client = pm.MongoClient(settings.MONGO_ADDRESS, username=settings.MONGO_USER, password=settings.MONGO_PASS)
 db = client["db"]
@@ -22,6 +23,46 @@ cors = CORS(app)
 socket = SocketIO(app)
 
 rooms = {}
+
+class UserInfo(Schema):
+        class Meta:
+                unknown = EXCLUDE
+        username = fields.String(required=True)
+        userId = fields.String(required=True)
+        email = fields.String(required=True)
+        displayName = fields.String()
+
+        @validates("email")
+        def validate_email(self, email):
+                print(validate.Email()(email))
+
+
+
+class UserAuth(Schema):
+        class Meta:
+                unknown = EXCLUDE
+
+        username = fields.String(required=True)
+        passwordHash = fields.String(required=True)
+        token = fields.String()
+
+class ChannelPerms(Schema):
+        pass
+
+class ChannelInfo(Schema):
+        class Meta:
+                unknown = EXCLUDE
+        channelId = fields.Str(required=True)
+        channelName = fields.Str(required=True)
+        channelPerms = fields.Nested(ChannelPerms)
+
+class MessageInfo(Schema):
+        messageId = fields.Int(required=True)
+        content = fields.Str(required=True)
+        user = fields.Str(required=True)
+        timestamp = fields.DateTime(required=True)
+        target = fields.Str(required=True)
+        targetMessage: int | None = fields.Int()
 
 
 
@@ -76,7 +117,7 @@ class chat_room(Namespace):
         Args:
             Namespace (_type_): _description_
         """
-        def __init__(self, namespace = None, chat_name = None, permissions:dict = None):
+        def __init__(self, namespace = None, chat_name = None, permissions:ChannelPerms = None):
                 super().__init__(namespace)
                 print(namespace)
                 self.channelId = namespace
@@ -296,42 +337,64 @@ class chat_room(Namespace):
         def on_messages(self, data):
                 print(data["content"])
 
-
 def generate_token():
     generated_token = binascii.hexlify(os.urandom(10)).decode()
     while auth.find_one({ "token": generated_token }) is not None:
         generated_token = binascii.hexlify(os.urandom(10)).decode()
     return generated_token
 
-def generate_user_id():
+def generate_user_id() -> str:
         generated_id = str(uuid.uuid4())
         while users.find_one({ "userId": generated_id }) is not None:
                 generated_id = str(uuid.uuid4())
         return generated_id
 
-def dictify(collection):
-        return json.loads(json.dumps(collection, default=str))
+def check_auth_from_headers(headers) -> bool:
+        """Checks if the request has a valid token in the headers.
+
+        Args:
+            headers (dict): request headers.
+
+        Returns:
+            bool: True if the token is valid, False if not.
+        """
+        if headers.get('Authorization') is not None:
+                if auth.find_one({ "token": headers.get('Authorization') }) != None:
+                        return True
+        return False
 
 #auth
-@app.route('/checkauth', methods=['GET'])
+@app.route('/checkauth', methods=['GET']) # Fetches user info using token
 def check_auth():
         headers = request.headers
 
-        if headers.get('Authorization') is None:
+        if not check_auth_from_headers(headers):
                 return jsonify({"error": "Invalid token"}), 401
         
         user = auth.find_one({ "token": headers.get('Authorization') })
+        try:
+                user = UserAuth().load(user)
+        except ValidationError as e:
+                return jsonify({"error": e.messages}), 400
 
         return jsonify(user), 200
 
-@app.route('/getauth', methods=['POST'])
+@app.route('/getauth', methods=['POST']) # Fetches user info using username and password
 def post_auth():
         print("getting auth")
         data = request.get_json()
-        user = auth.find_one({ "username": data["username"], "passwordHash": data["passwordHash"] })
-        if user is None:
-                return jsonify({"error": "Invalid credentials"}), 401
-        return jsonify({"token": user["token"]}), 200
+
+        try:
+                auth_user:dict = UserAuth().load(data)
+
+                if auth.find_one(auth_user) is None:
+                        raise ValidationError("Invalid credentials")
+                auth_user.update({"token": auth.find_one(auth_user)["token"]})
+                print(auth_user, type(auth_user))
+                return jsonify(auth_user), 200
+        except ValidationError as e:
+                print(e.messages)
+                return jsonify({"error":e.messages}), 400
 
 
 # user
@@ -339,87 +402,95 @@ def post_auth():
 def post_user():
         print("creating user")
         data = request.get_json()
-        user = users.find_one({ "username": data["username"] })
-        if user is not None:
-                return jsonify({"error": "User already exists"}), 400
+
         user_id = generate_user_id()
         token = str(generate_token())
-        users.insert_one({ "username": data["username"], "email": data["email"], "userId": user_id })
-        auth.insert_one({ "username": data["username"], "passwordHash": data["passwordHash"], "token": token })
-        return jsonify({ "username": data["username"], "passwordHash": data["passwordHash"], "token": token }), 201
+
+        data.update({"userId": user_id, "token": token})
+
+        try:
+                userInfo = UserInfo().load(data)
+                userAuth = UserAuth().load(data)
+
+                print(userAuth, type(userAuth))
+
+                if auth.find_one({ "username": userAuth["username"] }) is not None:
+                        raise ValidationError("Username already exists")
+                
+        except ValidationError as e:
+                return jsonify({"error": e.messages}), 400
+
+        users.insert_one(userInfo.copy()) # fucking bullshit, why does insert_one mutate userInfo? Must do .copy() to prevent mutation
+        auth.insert_one(userAuth.copy())
+        return jsonify(userAuth), 201
+
+@app.route('/user/<userId>', methods=['DELETE'])
+def delete_user(userId):
+        user = users.find_one({ "userId ": userId })
+        if user is None:
+                return jsonify({"error": "User not found"}), 404
+        users.delete_one({ "userId": userId })
+        return jsonify({"message": "User deleted"}), 200
 
 @app.route('/userfromid/<userId>', methods=['GET'])
 def get_user_from_id(userId):
         user = users.find_one({"userId": userId})
-        headers = request.headers
-        if headers.get('Authorization') is None:
+
+        if not check_auth_from_headers(request.headers):
                 return jsonify({"error": "Invalid token"}), 401
         
-        token = headers.get('Authorization')
-        auth_user = auth.find_one({ "token": token })
-
-        if auth_user is None:
-                return jsonify({"error": "Invalid token"}), 401
         if user is None:
                 return jsonify({"error": "User not found"}), 404
+        
         return jsonify(user), 200
 
 @app.route('/userfromname/<userName>', methods=['GET'])
 def get_user_from_name(userName):
-        user = users.find_one({ "username": userName })
-        headers = request.headers
-        if headers.get('Authorization') is None:
-                return jsonify({"error": "Invalid token"}), 401
-        
-        token = headers.get('Authorization')
-        auth_user = auth.find_one({ "token": token })
 
-        if auth_user is None:
+        headers = request.headers
+        if not check_auth_from_headers(headers):
                 return jsonify({"error": "Invalid token"}), 401
-        if user is None:
-                return jsonify({"error": "User not found"}), 404
-        return jsonify(dictify(user)), 200
+
+        user = users.find_one({ "username": userName })
+
+        try:
+                user = UserInfo().load(user)
+        except ValidationError as e:
+                return jsonify({"error": e.messages}), 400
+        
+        return jsonify(user), 200
 
 @app.route('/users', methods=['GET'])
 def get_users():
         users_list = []
         headers = request.headers
-        if headers.get('Authorization') is None:
+
+        if not check_auth_from_headers(headers):
                 return jsonify({"error": "Invalid token"}), 401
         
-        token = headers.get('Authorization')
-        auth_user = auth.find_one({ "token": token })
-
-        if auth_user is None:
-                return jsonify({"error": "Invalid token"}), 401
-        for user in users.find():
-                users_list.append({"username": user["username"], "userId": user["userId"]})
-        return jsonify({"users": users_list}), 200
-
-#@app.route('/userfromid/<userId>', methods=['DELETE'])
-#def delete_user(userId):
-#        user = users.find_one({ "userId": userId })
-#        if user is None:
-#                return jsonify({"error": "User not found"}), 404
-#        users.delete_one({ "userId": userId })
-#        return jsonify({"message": "User deleted"}), 200
-
+        try:
+                users_list = UserInfo(many=True).load(users.find().to_list())
+                return jsonify({"users": users_list}), 200
+        except ValidationError as e:
+                print(e.messages)
+                return jsonify({"users": e.valid_data}), 400
 
 # channels
 @app.route('/channels', methods=['GET'])
 def get_channels():
         channels_list = []
         headers = request.headers
-        if headers.get('Authorization') is None:
+        
+        if not check_auth_from_headers(headers):
                 return jsonify({"error": "Invalid token"}), 401
         
-        token = headers.get('Authorization')
-        auth_user = auth.find_one({ "token": token })
-        if auth_user is None:
-                return jsonify({"error": "Invalid token"}), 401
-        
-        for channel in channels.find():
-                channels_list.append({"channelId": channel["channelId"], "channelName": channel["channelName"], "channelPerms": channel["channelPerms"]})
+        try:
+                channels_list = channels.find().to_list()
+                channels_list = ChannelInfo(many=True).load(channels_list)
+        except ValidationError as e:
+                print(e.messages)
+                return jsonify({"channels": e.valid_data}), 400
+        print("No channels found")
         return jsonify({"channels": channels_list}), 200
 
 @app.route('/channels/<channelId>', methods=['GET'])
@@ -427,19 +498,15 @@ def get_channel(channelId):
         channel = channels.find_one({"channelId": channelId})
         headers = request.headers
 
-        if headers.get('Authorization') is None:
+        if not check_auth_from_headers(headers):
                 return jsonify({"error": "Invalid token"}), 401
-                print("gay")
         
-        token = headers.get('Authorization')
-        auth_user = auth.find_one({"token": token})
+        try:
+                channel = ChannelInfo().load(channel)
+        except ValidationError as e:
+                return jsonify(e.messages), 400
 
-        if auth_user is None:
-                return jsonify({"error": "Invalid token"}), 401
-        
-        if channel is None:
-                return jsonify({"error": "Channel not found"}), 404 
-        return jsonify(dictify(channel)), 200
+        return jsonify(channel), 200
 
 #messages
 @app.route('/channels/<channelId>/messages', methods=['GET'])
@@ -449,13 +516,7 @@ def get_messages(channelId):
         messageId = request.args.get('messageId')
         room = request.args.get('room')
 
-        if headers.get('Authorization') is None:
-                return jsonify({"error": "Invalid token"}), 401
-        
-        token = headers.get('Authorization')
-        auth_user = auth.find_one({ "token": token })
-
-        if auth_user is None:
+        if not check_auth_from_headers(headers):
                 return jsonify({"error": "Invalid token"}), 401
         
         if channel is None:
@@ -464,9 +525,13 @@ def get_messages(channelId):
         messages_list = messages.find({"channelId": channelId, "room": room})\
                         .sort("messageId", pm.DESCENDING)\
                         .skip(messages.count_documents() - messageId)\
-                        .limit(100)
+                        .limit(100)\
+                        .to_list()
         
-        return jsonify({"messages": messages_list.to_list()}), 200
+        messages_list = MessageInfo(many=True).load(messages_list)
+        
+        
+        return jsonify({"messages": messages_list}), 200
 
 @app.route('/channels/<channelId>/messages', methods=['POST'])
 def send_message(channelId):
@@ -474,13 +539,7 @@ def send_message(channelId):
         channel = channels.find_one({"channelId": channelId})
         headers = request.headers
 
-        if headers.get('Authorization') is None:
-                return jsonify({"error": "Invalid token"}), 401
-        
-        token = headers.get('Authorization')
-        auth_user = auth.find_one({ "token": token })
-
-        if auth_user is None:
+        if not check_auth_from_headers(headers):
                 return jsonify({"error": "Invalid token"}), 401
         
         if channel is None:
@@ -488,18 +547,26 @@ def send_message(channelId):
         
         messageId = messages.count_documents() + 1
         data.update({"messageId": messageId})
-        messages.insert_one(data)
 
-        room:chat_room = rooms[channelId]
-        room.on_send_message(data=data)
+        try:
+                message = MessageInfo().load(data)
+                messages.insert_one(message.copy())
+                
+                room:chat_room = rooms[channelId]
+                room.on_send_message(data=data)
+        except ValidationError as e:
+                return jsonify(e.messages), 400
+        
 
-        return data, 201
+        return jsonify(message), 201
 
 @app.route('/messages/<messageId>', methods=['GET'])
 def get_message(messageId):
         message = messages.find_one({"messageId": messageId})
-        if message is None:
-                return jsonify({"error": "Message not found"}), 404
+        try:
+                message = MessageInfo().load(message)
+        except ValidationError as e:
+                return jsonify(e.messages), 400
         return jsonify(message), 200
 
 
@@ -517,13 +584,18 @@ def fetch_namespaces():
 #rooms  
 @app.route("/channels/create", methods=['POST'])
 def create_channel():
+
+        if not check_auth_from_headers(request.headers):
+                return jsonify({"error": "Invalid token"}), 401
+
         data = request.get_json()
         chat = chat_room(f"/{data['channelId']}", data['channelName'], data['channelPerms'])
         print(chat.namespace)
-        channelDict = {"channelId": data['channelId'], "channelName": data['channelName'], "channelPerms": data['channelPerms']}
-        if channels.find_one({"channelId": data['channelId']}) is not None:
+
+        channelDict = ChannelInfo().load(data)
+        if channels.find_one({"channelId": channelDict["channelId"]}) is not None:
                 return jsonify({"error": "Channel already exists"}), 400
-        channels.insert_one({"channelId": data['channelId'], "channelName": data['channelName'], "channelPerms": data['channelPerms']})
+        channels.insert_one(channelDict.copy())
 
         socket.on_namespace(chat)
         return jsonify(channelDict), 201
@@ -533,18 +605,7 @@ def populate_channels():
         create_chat_rooms()
         return jsonify({"message": "Populated channels"}), 200
 
-
-@socket.on("hello_world", namespace="/test")
-def on_test(data):
-        print(data)
-
-@socket.on("greetings", namespace="/test")
-def on_greetings(data):
-        print(data)
-        emit("greetings", "Herro world!")
-
-
-def create_chat_rooms():
+async def create_chat_rooms():
         """Generates chat room classes of database information.
 
         Args:
@@ -565,7 +626,7 @@ def create_chat_rooms():
 
 if __name__ == "__main__":
         asyncio.run(app.run(debug=True))
-        asyncio.run(create_chat_rooms())
+        asyncio.create_task(create_chat_rooms())
         
         
         
