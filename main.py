@@ -31,6 +31,7 @@ class UserInfo(Schema):
         userId = fields.String(required=True)
         email = fields.String(required=True)
         displayName = fields.String()
+        friends = fields.Dict(fields.String(), fields.List(fields.UUID()), load_default={"pending": [], "requested": [], "friends": []})
 
         @validates("email")
         def validate_email(self, email):
@@ -363,7 +364,7 @@ def check_auth_from_headers(headers) -> bool:
                         return True
         return False
 
-#auth
+# * auth
 @app.route('/checkauth', methods=['GET']) # Fetches user info using token
 def check_auth():
         headers = request.headers
@@ -389,15 +390,18 @@ def post_auth():
 
                 if auth.find_one(auth_user) is None:
                         raise ValidationError("Invalid credentials")
+                
                 auth_user.update({"token": auth.find_one(auth_user)["token"]})
-                print(auth_user, type(auth_user))
+
                 return jsonify(auth_user), 200
         except ValidationError as e:
                 print(e.messages)
+                if "Invalid credentials" in e.messages:
+                        return jsonify({"error": "Invalid credentials"}), 401
                 return jsonify({"error":e.messages}), 400
 
 
-# user
+# * user
 @app.route('/user/new', methods=['POST'])
 def post_user():
         print("creating user")
@@ -412,15 +416,13 @@ def post_user():
                 userInfo = UserInfo().load(data)
                 userAuth = UserAuth().load(data)
 
-                print(userAuth, type(userAuth))
-
                 if auth.find_one({ "username": userAuth["username"] }) is not None:
                         raise ValidationError("Username already exists")
                 
         except ValidationError as e:
                 return jsonify({"error": e.messages}), 400
 
-        users.insert_one(userInfo.copy()) # fucking bullshit, why does insert_one mutate userInfo? Must do .copy() to prevent mutation
+        users.insert_one(userInfo.copy()) # !fucking bullshit, why does insert_one mutate userInfo? Must do .copy() to prevent mutation
         auth.insert_one(userAuth.copy())
         return jsonify(userAuth), 201
 
@@ -460,6 +462,64 @@ def get_user_from_name(userName):
         
         return jsonify(user), 200
 
+ACCEPT = "accept"
+DECLINE = "decline"
+REQUEST = "request"
+UNFRIEND = "unfriend"
+UNREQUEST = "unrequest"
+def update_friends_list(userId, targetId, action):
+        if userId == targetId:
+                return jsonify({"error": "Cannot friend yourself"}), 400
+        try:
+                user = users.find_one({"userId": userId})
+                target = users.find_one({"userId": targetId})
+
+                user.setdefault("friends", {"pending": [], "requested": [], "friends": []})
+                target.setdefault("friends", {"pending": [], "requested": [], "friends": []})
+        except:
+                return jsonify({"error": "User not found"}), 404
+
+        #! A lot of these cases assume that the UIDs are present in the lists already. Checks should be made before.
+        if action == ACCEPT:
+                user["friends"]["friends"].append(targetId)
+                target["friends"]["friends"].append(userId)
+                user["friends"]["pending"].remove(targetId)
+                target["friends"]["requested"].remove(userId)
+        if action == DECLINE:
+                user["friends"]["pending"].remove(targetId)
+                target["friends"]["requested"].remove(userId)
+        if action == REQUEST:
+                user["friends"]["requested"].append(targetId)
+                target["friends"]["pending"].append(userId)
+        if action == UNFRIEND:
+                user["friends"]["friends"].remove(targetId)
+                target["friends"]["friends"].remove(userId)
+        if action == UNREQUEST:
+                user["friends"]["requested"].remove(targetId)
+                target["friends"]["pending"].remove(userId)
+
+        users.update_one({"userId": userId}, {"$set": user})
+        users.update_one({"userId": targetId}, {"$set": target})
+
+        return jsonify({"message": f"sent {action} to {targetId}"}), 201
+        
+
+@app.route('/user/friend', methods=['POST'])
+def request_friend():
+        headers = request.headers
+        action = request.args.get('action')
+
+        if action not in [ACCEPT, DECLINE, REQUEST, UNFRIEND, UNREQUEST]:
+                return jsonify({"error": "Invalid action"}), 400
+        
+        if not check_auth_from_headers(headers):
+                return jsonify({"error": "Invalid token"}), 401
+        
+        data = request.get_json()
+
+        return update_friends_list(data["self"]["userId"], data["target"]["userId"], action)
+
+
 @app.route('/users', methods=['GET'])
 def get_users():
         users_list = []
@@ -475,7 +535,7 @@ def get_users():
                 print(e.messages)
                 return jsonify({"users": e.valid_data}), 400
 
-# channels
+# * channels
 @app.route('/channels', methods=['GET'])
 def get_channels():
         channels_list = []
@@ -513,7 +573,7 @@ def get_channel(channelId):
 def get_messages(channelId):
         channel = channels.find_one({"channelId": channelId})
         headers = request.headers
-        messageId = request.args.get('messageId')
+        messageId = request.args.get('messageId', default=messages.count_documents(), type=int)
         room = request.args.get('room')
 
         if not check_auth_from_headers(headers):
