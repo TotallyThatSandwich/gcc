@@ -22,7 +22,7 @@ app = Flask(__name__)
 cors = CORS(app)
 socket = SocketIO(app)
 
-rooms = {}
+cachedChannels = {}
 
 class UserInfo(Schema):
         class Meta:
@@ -77,12 +77,19 @@ class MessageInfo(Schema):
 
 # Websockets
 class channelClass(Namespace): # chat_room V2
-        def __init__(self, namespace = None):
+        def __init__(self, namespace = None, channelName = None, permissions:ChannelPerms = None):
                 super().__init__(namespace)
                 self.channelId = namespace
+                self.channelName = None
                 self.rooms = {}
                 self.users = {}
-                self.perms = {}        
+                self.perms = {}
+
+        def initFromDict(self, data):
+                self.channelId = f"/{data['channelId']}"
+                self.rooms = data["rooms"]
+                self.users = data["users"]
+                self.perms = data["perms"]       
 
         class joinEvents(Schema):
                 action = fields.String(required=True),
@@ -123,6 +130,21 @@ class channelClass(Namespace): # chat_room V2
                 leave_room(room)
                 self.rooms[room]["users"].remove(self.users[sid])
                 print(f"User {self.users[sid]['username']} left room {room}")
+        
+        async def on_send_message(self, data):
+                target = data['target']
+                
+                try:
+                        data = MessageInfo().load(data)
+                except ValidationError as e:
+                        return {"status": 400, "content": e.messages}
+
+                if target in list(self.users.keys()):
+                        emit("private_message", to=target, data=data, include_self=True)
+                        return
+                
+                emit("message", data, broadcast=True, to=target, include_self=True)
+
 
 # class chat_room(Namespace):
 #         """A class to represent a namespace of the websocket. After creating a channel(``chat_room``), methods below are automatically handled as events.\n
@@ -426,7 +448,7 @@ def check_auth():
         headers = request.headers
 
         if not check_auth_from_headers(headers):
-                return jsonify({"error": "Invalid token"}), 401
+                return jsonify({"error": "Invalid credentials"}), 401
         
         user = auth.find_one({ "token": headers.get('Authorization') })
         try:
@@ -479,8 +501,8 @@ def post_user():
                 return jsonify({"error": e.messages}), 400
 
         users.insert_one(userInfo.copy()) # !fucking bullshit, why does insert_one mutate userInfo? Must do .copy() to prevent mutation
-        auth.insert_one(userAuth.copy())
-        return jsonify(userAuth), 201
+        auth.insert_one(document=userAuth.copy())
+        return jsonify({"Authentication": userAuth, "User": userInfo}), 201
 
 @app.route('/user/<userId>', methods=['DELETE'])
 def delete_user(userId):
@@ -495,7 +517,7 @@ def get_user_from_id(userId):
         user = users.find_one({"userId": userId})
 
         if not check_auth_from_headers(request.headers):
-                return jsonify({"error": "Invalid token"}), 401
+                return jsonify({"error": "Invalid credentials"}), 401
         
         if user is None:
                 return jsonify({"error": "User not found"}), 404
@@ -507,7 +529,7 @@ def get_user_from_name(userName):
 
         headers = request.headers
         if not check_auth_from_headers(headers):
-                return jsonify({"error": "Invalid token"}), 401
+                return jsonify({"error": "Invalid credentials"}), 401
 
         user = users.find_one({ "username": userName })
 
@@ -518,6 +540,7 @@ def get_user_from_name(userName):
         
         return jsonify(user), 200
 
+
 ACCEPT = "accept"
 DECLINE = "decline"
 REQUEST = "request"
@@ -525,10 +548,13 @@ UNFRIEND = "unfriend"
 UNREQUEST = "unrequest"
 def update_friends_list(userId, targetId, action):
         if userId == targetId:
-                return jsonify({"error": "Cannot friend yourself"}), 400
+                return jsonify({"error": {"target": ["Cannot friend yourself"]}}), 400
         try:
                 user = users.find_one({"userId": userId})
                 target = users.find_one({"userId": targetId})
+
+                user:dict = UserInfo().load(user)
+                target:dict = UserInfo().load(target)
 
                 user.setdefault("friends", {"pending": [], "requested": [], "friends": []})
                 target.setdefault("friends", {"pending": [], "requested": [], "friends": []})
@@ -554,10 +580,10 @@ def update_friends_list(userId, targetId, action):
                 user["friends"]["requested"].remove(targetId)
                 target["friends"]["pending"].remove(userId)
 
-        users.update_one({"userId": userId}, {"$set": user})
-        users.update_one({"userId": targetId}, {"$set": target})
+        users.update_one({"userId": userId}, {"$set": user.copy()})
+        users.update_one({"userId": targetId}, {"$set": target.copy()})
 
-        return jsonify({"message": f"sent {action} to {targetId}"}), 201
+        return jsonify(user), 201
         
 
 @app.route('/user/friend', methods=['POST'])
@@ -566,10 +592,10 @@ def request_friend():
         action = request.args.get('action')
 
         if action not in [ACCEPT, DECLINE, REQUEST, UNFRIEND, UNREQUEST]:
-                return jsonify({"error": "Invalid action"}), 400
+                return jsonify({"error": {"action": ["Invalid action"]}}), 400
         
         if not check_auth_from_headers(headers):
-                return jsonify({"error": "Invalid token"}), 401
+                return jsonify({"error": "Invalid credentials"}), 401
         
         data = request.get_json()
 
@@ -582,7 +608,7 @@ def get_users():
         headers = request.headers
 
         if not check_auth_from_headers(headers):
-                return jsonify({"error": "Invalid token"}), 401
+                return jsonify({"error": "Invalid credentials"}), 401
         
         try:
                 users_list = UserInfo(many=True).load(users.find().to_list())
@@ -598,7 +624,7 @@ def get_channels():
         headers = request.headers
         
         if not check_auth_from_headers(headers):
-                return jsonify({"error": "Invalid token"}), 401
+                return jsonify({"error": "Invalid credentials"}), 401
         
         try:
                 channels_list = channels.find().to_list()
@@ -615,7 +641,7 @@ def get_channel(channelId):
         headers = request.headers
 
         if not check_auth_from_headers(headers):
-                return jsonify({"error": "Invalid token"}), 401
+                return jsonify({"error": "Invalid credentials"}), 401
         
         try:
                 channel = ChannelInfo().load(channel)
@@ -633,7 +659,7 @@ def get_messages(channelId):
         room = request.args.get('room')
 
         if not check_auth_from_headers(headers):
-                return jsonify({"error": "Invalid token"}), 401
+                return jsonify({"error": "Invalid credentials"}), 401
         
         if channel is None:
                 return jsonify({"error": "Channel not found"}), 404
@@ -656,7 +682,7 @@ def send_message(channelId):
         headers = request.headers
 
         if not check_auth_from_headers(headers):
-                return jsonify({"error": "Invalid token"}), 401
+                return jsonify({"error": "Invalid credentials"}), 401
         
         if channel is None:
                 return jsonify({"error": "Channel not found"}), 404
@@ -668,7 +694,7 @@ def send_message(channelId):
                 message = MessageInfo().load(data)
                 messages.insert_one(message.copy())
                 
-                room:channelClass = rooms[channelId]
+                room:channelClass = cachedChannels[channelId]
                 room.on_send_message(data=data)
         except ValidationError as e:
                 return jsonify(e.messages), 400
@@ -685,13 +711,13 @@ def get_message(messageId):
                 return jsonify(e.messages), 400
         return jsonify(message), 200
 
-
-
 @app.route('/channels', methods=['DELETE'])
 def delete_channels():
         print("deleting channels")
         for channel in channels.find():
                 channels.delete_one({ "channelId": channel["channelId"] })
+        
+        cachedChannels.clear()
         return jsonify({"message": "Channel deleted"}), 200
 
 @app.route("/namespaces", methods=['POST'])
@@ -702,17 +728,22 @@ def fetch_namespaces():
 def create_channel():
 
         if not check_auth_from_headers(request.headers):
-                return jsonify({"error": "Invalid token"}), 401
+                return jsonify({"error": "Invalid credentials"}), 401
 
-        data = request.get_json()
-        chat = channelClass(f"/{data['channelId']}", data['channelName'], data['channelPerms'])
-        print(chat.namespace)
+        
+        try:
+                data = request.get_json()
+                channelDict = ChannelInfo().load(data)
+        except ValidationError as e:
+                return jsonify({"error": e.messages}), 400
+        except Exception as e:
+                return jsonify({"error": str(e)}), 400
 
-        channelDict = ChannelInfo().load(data)
         if channels.find_one({"channelId": channelDict["channelId"]}) is not None:
-                return jsonify({"error": "Channel already exists"}), 400
+                return jsonify({"error": {"channel name": ["Channel already exists"]}}), 400
         channels.insert_one(channelDict.copy())
 
+        chat = channelClass(f"/{channelDict['channelId']}", channelDict["channelName"], channelDict["channelPerms"])
         socket.on_namespace(chat)
         return jsonify(channelDict), 201
 
@@ -730,14 +761,21 @@ async def create_channels():
         namespaces = channels.find()
         print(channels)
         for channel in namespaces:
-                if channel['channelId'] in list(rooms.keys()):
+                if channel['channelId'] in list(cachedChannels.keys()):
                         continue
-        
-                print("channel", channel)
-                chat = channelClass(f"/{channel['channelId']}", channel["channelName"], channel["channelPerms"])
-                rooms.update({channel["channelId"] : chat})
-                socket.on_namespace(chat)
-        return rooms
+                try:
+                        channelDict = ChannelInfo().load(channel)
+                        chat = channelClass()
+                        chat.initFromDict(channelDict)
+                        cachedChannels.update({channel["channelId"] : chat})
+                        socket.on_namespace(chat)
+                except ValidationError as e:
+                        print(e.messages)
+                        continue
+                except Exception as e:
+                        print(e)
+                        continue
+        return cachedChannels
 
 
 if __name__ == "__main__":
