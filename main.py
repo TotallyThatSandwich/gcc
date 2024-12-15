@@ -497,15 +497,14 @@ def generate_default_pfps():
 def upload_pfp():
         # TODO: check if this actually fucking works
         print("uploading pfp")
+        token = request.headers.get('Authorization')
         if not check_auth_from_headers(request.headers):
                 return jsonify({"error": "Invalid credentials"}), 401
-
-        data = request.get_json()
-        user = users.find_one({ "userId": data["userId"] })
-
+        
+        user = auth.find_one({ "token": token })
+        user = users.find_one({ "userId": user["userId"] })
         if user is None:
                 return jsonify({"error": "User not found"}), 404
-        
         try:
                 user = UserInfo().load(user)
         except ValidationError as e:
@@ -513,16 +512,16 @@ def upload_pfp():
         
         requestFiles = request.files
         if len(requestFiles) == 0:
-                return jsonify({"error": "No files uploaded"}), 400
+                return jsonify({"error": {"files": ["No files uploaded"]}}), 400
         
         file = requestFiles['file']
         if file.filename == '':
-                return jsonify({"error": "No selected file"}), 400
+                return jsonify({"error": {"files": ["No selected file"]}}), 400
         if not file:
-                return jsonify({"error": "No file part"}), 400
+                return jsonify({"error": {"files": ["No file part"]}}), 400
         fileFormat = filename.split('.')[-1]
         if fileFormat not in ["png", "jpg", "jpeg", "gif"]:
-                return jsonify({"error": "Invalid file type"}), 400
+                return jsonify({"error": {"files": ["Invalid file type"]}}), 400
         
         filename = secure_filename(file.filename)
         file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
@@ -535,7 +534,7 @@ def upload_pfp():
         imgByteArr = imgByteArr.getvalue()
         
         user.update({"profilePicture": imgByteArr})
-        users.update_one({ "userId": data["userId"] }, { "$set": user.copy() })
+        users.update_one({"userId": user["userId"] }, { "$set": user.copy() })
         return jsonify(user), 201
 
 @app.route('/user/<userId>/pfp', methods=['GET'])
