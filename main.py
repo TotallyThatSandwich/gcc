@@ -2,13 +2,24 @@ import asyncio
 import pymongo as pm
 from pymongo import collection
 import json
-from flask import Flask, jsonify, request
-from flask_socketio import SocketIO, send, emit, Namespace, join_room, leave_room
-from flask_cors import CORS, cross_origin
 import settings
 import binascii
 import os
 import uuid
+
+# Flask
+from flask import Flask, jsonify, request, render_template
+from werkzeug.utils import secure_filename
+from flask_socketio import SocketIO, send, emit, Namespace, join_room, leave_room
+from flask_cors import CORS, cross_origin
+
+# Image handling
+from bson.binary import Binary
+from PIL import Image
+from io import BytesIO
+UPLOAD_FOLDER = os.path.join(os.getcwd(), "uploads")
+
+# Marshmallow
 from marshmallow import Schema, fields, ValidationError, validates, EXCLUDE, INCLUDE, validate
 
 client = pm.MongoClient(settings.MONGO_ADDRESS, username=settings.MONGO_USER, password=settings.MONGO_PASS)
@@ -17,8 +28,10 @@ auth:collection.Collection = db["auth"]
 users:collection.Collection = db["users"]
 channels:collection.Collection = db["channels"]
 messages:collection.Collection = db["messages"]
+images:collection.Collection = db["images"]
 
 app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 cors = CORS(app)
 socket = SocketIO(app)
 
@@ -31,6 +44,7 @@ class UserInfo(Schema):
         userId = fields.String(required=True)
         email = fields.String(required=True)
         displayName = fields.String()
+        profilePicture = fields.String()
         friends = fields.Dict(fields.String(), fields.List(fields.UUID()), load_default={"pending": [], "requested": [], "friends": []})
 
         @validates("email")
@@ -90,11 +104,6 @@ class channelClass(Namespace): # chat_room V2
                 self.rooms = data["rooms"]
                 self.users = data["users"]
                 self.perms = data["perms"]       
-
-        class joinEvents(Schema):
-                action = fields.String(required=True),
-                user = fields.Nested(UserInfo, required=True),
-                room = fields.String(RoomInfo, required=True)
                 
         async def on_connect(self, auth):
                 sid = request.sid
@@ -480,6 +489,75 @@ def post_auth():
 
 
 # * user
+def generate_default_pfps():
+        # TODO: Add a way to generate default profile pictures!
+        pass
+
+@app.route('/user/pfp', methods=['PUT'])
+def upload_pfp():
+        # TODO: check if this actually fucking works
+        print("uploading pfp")
+        if not check_auth_from_headers(request.headers):
+                return jsonify({"error": "Invalid credentials"}), 401
+
+        data = request.get_json()
+        user = users.find_one({ "userId": data["userId"] })
+
+        if user is None:
+                return jsonify({"error": "User not found"}), 404
+        
+        try:
+                user = UserInfo().load(user)
+        except ValidationError as e:
+                return jsonify({"error": e.messages}), 400
+        
+        requestFiles = request.files
+        if len(requestFiles) == 0:
+                return jsonify({"error": "No files uploaded"}), 400
+        
+        file = requestFiles['file']
+        if file.filename == '':
+                return jsonify({"error": "No selected file"}), 400
+        if not file:
+                return jsonify({"error": "No file part"}), 400
+        fileFormat = filename.split('.')[-1]
+        if fileFormat not in ["png", "jpg", "jpeg", "gif"]:
+                return jsonify({"error": "Invalid file type"}), 400
+        
+        filename = secure_filename(file.filename)
+        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+
+        
+        image = Image.open(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        image = image.resize((128, 128))
+        imgByteArr = BytesIO()
+        image.save(imgByteArr, format=fileFormat)
+        imgByteArr = imgByteArr.getvalue()
+        
+        user.update({"profilePicture": imgByteArr})
+        users.update_one({ "userId": data["userId"] }, { "$set": user.copy() })
+        return jsonify(user), 201
+
+@app.route('/user/<userId>/pfp', methods=['GET'])
+def get_default_pfp(userId):
+        # TODO: check if this actually works
+        if not check_auth_from_headers(request.headers):
+                return jsonify({"error": "Invalid credentials"}), 401
+
+        user = users.find_one({"userId": userId})
+        if user is None:
+                return jsonify({"error": "User not found"}), 404
+        
+        try:
+                user = UserInfo().load(user)
+        except ValidationError as e:
+                return jsonify({"error": e.messages}), 400
+        
+        image = Image.open(BytesIO(user["profilePicture"]))
+        image.save(os.path.join(app.config['UPLOAD_FOLDER'], f"{userId}.png"))
+        
+        return os.path.join(app.config['UPLOAD_FOLDER'], f"{userId}.png"), 200
+
 @app.route('/user/new', methods=['POST'])
 def post_user():
         print("creating user")

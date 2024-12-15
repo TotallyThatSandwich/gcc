@@ -4,3 +4,4 @@ flask-Cors >= 5.0.0
 flask-socketio >= 5.4.1
 python-dotenv >= 1.0.1
 marshmallow >= 3.23.1
+pillow >= 11.0.0
