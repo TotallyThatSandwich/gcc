@@ -6,7 +6,6 @@ import settings
 import binascii
 import os
 import uuid
-
 # Flask
 from flask import Flask, jsonify, request, send_file
 from werkzeug.utils import secure_filename
@@ -47,7 +46,7 @@ class UserInfo(Schema):
         userId = fields.String(required=True)
         email = fields.Email(required=True)
         displayName = fields.String()
-        profilePicture = fields.String()
+        profilePicture = fields.Raw()
         friends = fields.Dict(fields.String(), fields.List(fields.UUID()), load_default={"pending": [], "requested": [], "friends": []})
 
         @validates("email")
@@ -259,6 +258,10 @@ def generate_default_pfps():
         background.save(imgByteArr, format="png")
         imgByteArr = imgByteArr.getvalue()
 
+        inverted.close()
+        background.close()
+        image.close()
+
         return imgByteArr
 
         
@@ -305,6 +308,7 @@ def upload_pfp():
         
         user.update({"profilePicture": imgByteArr})
         users.update_one({"userId": user["userId"] }, { "$set": user.copy() })
+        image.close()
         return jsonify(user), 201
 
 @app.route('/user/<userId>/pfp', methods=['GET'])
@@ -324,6 +328,7 @@ def get_default_pfp(userId):
         
         if user.get("profilePicture") is None:
                 pfp = generate_default_pfps()
+                print("storing", pfp)
                 user.update({"profilePicture": pfp})
                 users.update_one({"userId": userId}, { "$set": user.copy() })
                 user = UserInfo().load(user)
@@ -331,11 +336,13 @@ def get_default_pfp(userId):
         
 
         imageBytes = user["profilePicture"]
-        if "b'" in imageBytes[:2]:
-                imageBytes = imageBytes[2:]
-        
-        print(imageBytes)
-        imageBytes = imageBytes.encode()
+
+        if type(imageBytes) == str:
+                if "b'" in imageBytes[:2]:
+                        imageBytes = imageBytes[2:]
+                        imageBytes = imageBytes[:-1]
+                imageBytes = imageBytes.encode()
+
         imageBytes = BytesIO(imageBytes)
 
         imageBytes.seek(0)
@@ -346,14 +353,16 @@ def get_default_pfp(userId):
         image = Image.open(imageBytes)
         image = image.convert("RGBA")
         image.save("resources/" + f"{userId}.png")
+        image.close()
         
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{userId}.png")
         try:
-                return send_file(app.config['UPLOAD_FOLDER'] + f"{userId}.png"), 200
+                print("sending", file_path)
+                return send_file(file_path), 200
         except FileNotFoundError:
                 return jsonify({"error": "File not found"}), 404
-        finally:
-                if os.path.exists(app.config['UPLOAD_FOLDER'] + f"{userId}.png"):
-                        os.remove(app.config['UPLOAD_FOLDER'] + f"{userId}.png")
+        
+        # ! MAKE A FUNCTION TO DELETE THE IMAGE FILES AFTER THEY ARE SENT
 
 @app.route('/user/new', methods=['POST'])
 def post_user():
@@ -656,6 +665,6 @@ async def create_channels():
 if __name__ == "__main__":
         asyncio.run(app.run(debug=True))
         asyncio.create_task(create_channels())
-        
-        
-        
+
+
+
