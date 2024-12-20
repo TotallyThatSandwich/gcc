@@ -46,7 +46,6 @@ class UserInfo(Schema):
         userId = fields.String(required=True)
         email = fields.Email(required=True)
         displayName = fields.String()
-        profilePicture = fields.Raw()
         friends = fields.Dict(fields.String(), fields.List(fields.UUID()), load_default={"pending": [], "requested": [], "friends": []})
 
         @validates("email")
@@ -220,9 +219,7 @@ def post_auth():
 
 
 # * user
-def generate_default_pfps():
-        # TODO: Add a way to generate default profile pictures!
-
+def generate_default_pfps(userId):
         defaultPfp = images.find_one({"pfpdefault": {"$exists": True}})
         
         if defaultPfp is None:
@@ -254,27 +251,23 @@ def generate_default_pfps():
 
         background.paste(inverted, (0, 0), image)
 
-        imgByteArr = BytesIO()
-        background.save(imgByteArr, format="png")
-        imgByteArr = imgByteArr.getvalue()
+        background.save(f"resources/{userId}.png", format="png")
 
         inverted.close()
         background.close()
         image.close()
 
-        return imgByteArr
-
         
 @app.route('/user/pfp', methods=['PUT'])
 def upload_pfp():
-        # TODO: check if this actually fucking works
+        # ! IT FUCKING WORKS, but image sizing SHOULD BE DONE BEFOREHAND OTHERWISE IMAGES WILL BE WARPED.
         print("uploading pfp")
         token = request.headers.get('Authorization')
         if not check_auth_from_headers(request.headers):
                 return jsonify({"error": "Invalid credentials"}), 401
         
         user = auth.find_one({ "token": token })
-        user = users.find_one({ "userId": user["userId"] })
+        user = users.find_one({ "username": user["username"] })
 
         if user is None:
                 return jsonify({"error": "User not found"}), 404
@@ -292,7 +285,7 @@ def upload_pfp():
                 return jsonify({"error": {"files": ["No selected file"]}}), 400
         if not file:
                 return jsonify({"error": {"files": ["No file part"]}}), 400
-        fileFormat = filename.split('.')[-1]
+        fileFormat = file.filename.split('.')[-1]
         if fileFormat not in ["png", "jpg", "jpeg", "gif"]:
                 return jsonify({"error": {"files": ["Invalid file type"]}}), 400
         
@@ -305,15 +298,13 @@ def upload_pfp():
         imgByteArr = BytesIO()
         image.save(imgByteArr, format=fileFormat)
         imgByteArr = imgByteArr.getvalue()
-        
-        user.update({"profilePicture": imgByteArr})
-        users.update_one({"userId": user["userId"] }, { "$set": user.copy() })
+
+        images.update_one({"userId": user["userId"]}, { "$set": { "pfp": imgByteArr } })
         image.close()
         return jsonify(user), 201
 
 @app.route('/user/<userId>/pfp', methods=['GET'])
 def get_default_pfp(userId):
-        # TODO: check if this actually works
         if not check_auth_from_headers(request.headers):
                 return jsonify({"error": "Invalid credentials"}), 401
 
@@ -326,29 +317,23 @@ def get_default_pfp(userId):
         except ValidationError as e:
                 return jsonify({"error": e.messages}), 400
         
-        if user.get("profilePicture") is None:
-                pfp = generate_default_pfps()
-                print("storing", pfp)
-                user.update({"profilePicture": pfp})
-                users.update_one({"userId": userId}, { "$set": user.copy() })
-                user = UserInfo().load(user)
-                return jsonify(user), 201
+        if images.find_one({"userId": userId}) is None:
+                generate_default_pfps(userId)
+                with open("resources/" + f"{userId}.png", "rb") as f:
+                        imgdata = f.read()
+                
+                if images.find_one({"userId": userId}) is None:
+                        images.insert_one({"userId": userId, "pfp": imgdata})
+                else:
+                        images.update_one({"userId": userId}, {"$set": {"pfp": imgdata}})
+                return jsonify({"message": "Successfully created new profile picture!"}), 201
         
-
-        imageBytes = user["profilePicture"]
-
-        if type(imageBytes) == str:
-                if "b'" in imageBytes[:2]:
-                        imageBytes = imageBytes[2:]
-                        imageBytes = imageBytes[:-1]
-                imageBytes = imageBytes.encode()
-
+        imageBytes = images.find_one({"userId": userId})['pfp']
         imageBytes = BytesIO(imageBytes)
 
         imageBytes.seek(0)
         byteRead = imageBytes.read()
         
-        # ! NOT WORKING
         imageBytes = BytesIO(byteRead)
         image = Image.open(imageBytes)
         image = image.convert("RGBA")
@@ -362,7 +347,7 @@ def get_default_pfp(userId):
         except FileNotFoundError:
                 return jsonify({"error": "File not found"}), 404
         
-        # ! MAKE A FUNCTION TO DELETE THE IMAGE FILES AFTER THEY ARE SENT
+        # ! CURRENTLY, IMAGES ARE BEING DELETED AT THE START OF THE PROGRAM, FIND A FUCKING ALTERNATIVE!
 
 @app.route('/user/new', methods=['POST'])
 def post_user():
@@ -399,6 +384,7 @@ def delete_user(userId):
 @app.route('/userfromid/<userId>', methods=['GET'])
 def get_user_from_id(userId):
         user = users.find_one({"userId": userId})
+        user = UserInfo().load(user)
 
         if not check_auth_from_headers(request.headers):
                 return jsonify({"error": "Invalid credentials"}), 401
@@ -663,6 +649,9 @@ async def create_channels():
 
 
 if __name__ == "__main__":
+        for files in os.listdir("resources"):
+                if files != "GCC_pfp.png":
+                        os.remove(os.path.join("resources", files))
         asyncio.run(app.run(debug=True))
         asyncio.create_task(create_channels())
 
