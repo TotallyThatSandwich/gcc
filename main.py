@@ -39,6 +39,8 @@ socket = SocketIO(app)
 
 cachedChannels = {}
 
+baseurl = "/api/v2/"
+
 class UserInfo(Schema):
         class Meta:
                 unknown = EXCLUDE
@@ -182,7 +184,7 @@ def check_auth_from_headers(headers) -> bool:
         return False
 
 # * auth
-@app.route('/checkauth', methods=['GET']) # Fetches user info using token
+@app.route(f'{baseurl}/checkauth', methods=['GET']) # Fetches user info using token
 def check_auth():
         headers = request.headers
 
@@ -197,7 +199,7 @@ def check_auth():
 
         return jsonify(user), 200
 
-@app.route('/getauth', methods=['POST']) # Fetches user info using username and password
+@app.route(f'{baseurl}/getauth', methods=['POST']) # Fetches user info using username and password
 def post_auth():
         print("getting auth")
         data = request.get_json()
@@ -258,7 +260,7 @@ def generate_default_pfps(userId):
         image.close()
 
         
-@app.route('/user/pfp', methods=['PUT'])
+@app.route(f'{baseurl}/user/pfp', methods=['PUT'])
 def upload_pfp():
         # ! IT FUCKING WORKS, but image sizing SHOULD BE DONE BEFOREHAND OTHERWISE IMAGES WILL BE WARPED.
         print("uploading pfp")
@@ -316,7 +318,7 @@ def upload_pfp():
         image.close()
         return jsonify(user), 201
 
-@app.route('/user/<userId>/pfp', methods=['GET'])
+@app.route(f'{baseurl}/user/<userId>/pfp', methods=['GET'])
 def get_default_pfp(userId):
         if not check_auth_from_headers(request.headers):
                 return jsonify({"error": "Invalid credentials"}), 401
@@ -362,7 +364,7 @@ def get_default_pfp(userId):
         
         # ! CURRENTLY, IMAGES ARE BEING DELETED AT THE START OF THE PROGRAM, FIND A FUCKING ALTERNATIVE!
 
-@app.route('/user/new', methods=['POST'])
+@app.route(f'{baseurl}/user/new', methods=['POST'])
 def post_user():
         print("creating user")
         data = request.get_json()
@@ -386,7 +388,7 @@ def post_user():
         auth.insert_one(document=userAuth.copy())
         return jsonify({"Authentication": userAuth, "User": userInfo}), 201
 
-@app.route('/user/<userId>', methods=['DELETE'])
+@app.route(f'{baseurl}/user/<userId>', methods=['DELETE'])
 def delete_user(userId):
         user = users.find_one({ "userId ": userId })
         if user is None:
@@ -402,7 +404,7 @@ def get_user_from_id(userId):
         if not check_auth_from_headers(request.headers):
                 return jsonify({"error": "Invalid credentials"}), 401
         
-        if user is None:
+        if user is None
                 return jsonify({"error": "User not found"}), 404
         
         return jsonify(user), 200
