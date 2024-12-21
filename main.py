@@ -39,7 +39,7 @@ socket = SocketIO(app)
 
 cachedChannels = {}
 
-baseurl = "/api/v2/"
+baseurl = "/api/v2"
 
 class UserInfo(Schema):
         class Meta:
@@ -396,7 +396,7 @@ def delete_user(userId):
         users.delete_one({ "userId": userId })
         return jsonify({"message": "User deleted"}), 200
 
-@app.route('/userfromid/<userId>', methods=['GET'])
+@app.route(f'{baseurl}/userfromid/<userId>', methods=['GET'])
 def get_user_from_id(userId):
         user = users.find_one({"userId": userId})
         user = UserInfo().load(user)
@@ -409,7 +409,7 @@ def get_user_from_id(userId):
         
         return jsonify(user), 200
 
-@app.route('/userfromname/<userName>', methods=['GET'])
+@app.route(f'{baseurl}/userfromname/<userName>', methods=['GET'])
 def get_user_from_name(userName):
 
         headers = request.headers
@@ -471,7 +471,7 @@ def update_friends_list(userId, targetId, action):
         return jsonify(user), 201
         
 
-@app.route('/user/friend', methods=['POST'])
+@app.route(f'{baseurl}/user/friend', methods=['POST'])
 def request_friend():
         headers = request.headers
         action = request.args.get('action')
@@ -487,7 +487,7 @@ def request_friend():
         return update_friends_list(data["self"]["userId"], data["target"]["userId"], action)
 
 
-@app.route('/users', methods=['GET'])
+@app.route(f'{baseurl}/users', methods=['GET'])
 def get_users():
         users_list = []
         headers = request.headers
@@ -503,7 +503,7 @@ def get_users():
                 return jsonify({"users": e.valid_data}), 400
 
 # * channels
-@app.route('/channels', methods=['GET'])
+@app.route(f'{baseurl}/channels', methods=['GET'])
 def get_channels():
         channels_list = []
         headers = request.headers
@@ -520,7 +520,7 @@ def get_channels():
         print("No channels found")
         return jsonify({"channels": channels_list}), 200
 
-@app.route('/channels/<channelId>', methods=['GET'])
+@app.route(f'{baseurl}/channels/<channelId>', methods=['GET'])
 def get_channel(channelId):
         channel = channels.find_one({"channelId": channelId})
         headers = request.headers
@@ -536,7 +536,7 @@ def get_channel(channelId):
         return jsonify(channel), 200
 
 #messages
-@app.route('/channels/<channelId>/messages', methods=['GET'])
+@app.route(f'{baseurl}/channels/<channelId>/messages', methods=['GET'])
 def get_messages(channelId):
         channel = channels.find_one({"channelId": channelId})
         headers = request.headers
@@ -560,7 +560,7 @@ def get_messages(channelId):
         
         return jsonify({"messages": messages_list}), 200
 
-@app.route('/channels/<channelId>/messages', methods=['POST'])
+@app.route(f'{baseurl}/channels/<channelId>/messages', methods=['POST'])
 def send_message(channelId):
         data = request.get_json()
         channel = channels.find_one({"channelId": channelId})
@@ -587,7 +587,7 @@ def send_message(channelId):
 
         return jsonify(message), 201
 
-@app.route('/messages/<messageId>', methods=['GET'])
+@app.route(f'{baseurl}/messages/<messageId>', methods=['GET'])
 def get_message(messageId):
         message = messages.find_one({"messageId": messageId})
         try:
@@ -596,7 +596,7 @@ def get_message(messageId):
                 return jsonify(e.messages), 400
         return jsonify(message), 200
 
-@app.route('/channels', methods=['DELETE'])
+@app.route(f'{baseurl}/channels', methods=['DELETE'])
 def delete_channels():
         print("deleting channels")
         for channel in channels.find():
@@ -605,11 +605,11 @@ def delete_channels():
         cachedChannels.clear()
         return jsonify({"message": "Channel deleted"}), 200
 
-@app.route("/namespaces", methods=['POST'])
+@app.route(f"{baseurl}/namespaces", methods=['POST'])
 def fetch_namespaces():
        return socket._nsps.keys()
 #rooms  
-@app.route("/channels/create", methods=['POST'])
+@app.route(f"{baseurl}/channels/create", methods=['POST'])
 def create_channel():
 
         if not check_auth_from_headers(request.headers):
@@ -632,7 +632,7 @@ def create_channel():
         socket.on_namespace(chat)
         return jsonify(channelDict), 201
 
-@app.route("/channels/populate", methods=['POST'])
+@app.route(f"{baseurl}/channels/populate", methods=['POST'])
 def populate_channels():
         create_channels()
         return jsonify({"message": "Populated channels"}), 200
