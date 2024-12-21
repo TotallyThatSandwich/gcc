@@ -294,12 +294,25 @@ def upload_pfp():
 
         
         image = Image.open(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-        image = image.resize((128, 128))
+        if image.size != (128, 128):
+                width, height = image.size
+                new_width = min(width, height)
+                new_height = min(width, height)
+                left = (width - new_width) / 2
+                top = (height - new_height) / 2
+                right = (width + new_width) / 2
+                bottom = (height + new_height) / 2
+                image = image.crop((left, top, right, bottom))
+                image = image.resize((128, 128))
+
         imgByteArr = BytesIO()
         image.save(imgByteArr, format=fileFormat)
         imgByteArr = imgByteArr.getvalue()
 
-        images.update_one({"userId": user["userId"]}, { "$set": { "pfp": imgByteArr } })
+        if images.find_one({"userId": user["userId"]}) is None:
+                images.insert_one({"userId": user["userId"], "pfp": imgByteArr})
+        else:
+                images.update_one({"userId": user["userId"]}, {"userId": user["userId"], "pfp": imgByteArr })
         image.close()
         return jsonify(user), 201
 
